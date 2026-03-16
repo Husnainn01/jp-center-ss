@@ -3,12 +3,19 @@
 import os
 import hashlib
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
-S3_ENDPOINT = os.getenv("S3_ENDPOINT", "https://t3.storageapi.dev")
-S3_BUCKET = os.getenv("S3_BUCKET", "durable-briefcase-4cwl3t7")
-S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "")
-S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "")
+# Support both our naming and Railway's default naming
+S3_ENDPOINT = os.getenv("S3_ENDPOINT") or os.getenv("AWS_ENDPOINT_URL", "https://t3.storageapi.dev")
+S3_BUCKET = os.getenv("S3_BUCKET") or os.getenv("BUCKET_NAME", "durable-briefcase-4cwl3t7")
+S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY") or os.getenv("AWS_ACCESS_KEY_ID", "")
+S3_SECRET_KEY = os.getenv("S3_SECRET_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY", "")
+
+print(f"  [storage] Endpoint: {S3_ENDPOINT}")
+print(f"  [storage] Bucket: {S3_BUCKET}")
+print(f"  [storage] Access key: {S3_ACCESS_KEY[:10]}..." if S3_ACCESS_KEY else "  [storage] Access key: NOT SET")
+print(f"  [storage] Secret key: {'set (' + str(len(S3_SECRET_KEY)) + ' chars)' if S3_SECRET_KEY else 'NOT SET'}")
 
 _client = None
 
@@ -22,18 +29,13 @@ def _get_client():
             aws_access_key_id=S3_ACCESS_KEY,
             aws_secret_access_key=S3_SECRET_KEY,
             region_name="auto",
+            config=Config(signature_version="s3v4"),
         )
     return _client
 
 
 def upload_image(img_bytes: bytes, prefix: str, source_url: str) -> str | None:
-    """Upload image bytes to S3. Returns public URL or None on failure.
-
-    Args:
-        img_bytes: Raw image bytes
-        prefix: Folder prefix (e.g. 'ninja-images', 'taa-images')
-        source_url: Original URL (used to generate stable filename via hash)
-    """
+    """Upload image bytes to S3. Returns public URL or None on failure."""
     if not S3_ACCESS_KEY or not S3_SECRET_KEY:
         return None
 
