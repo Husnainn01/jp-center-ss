@@ -52,7 +52,7 @@ def upload_image(img_bytes: bytes, prefix: str, source_url: str) -> str | None:
         # Check if already exists
         try:
             client.head_object(Bucket=S3_BUCKET, Key=key)
-            return f"{S3_ENDPOINT}/{S3_BUCKET}/{key}"
+            return f"/s3/{key}"
         except ClientError:
             pass
 
@@ -61,9 +61,8 @@ def upload_image(img_bytes: bytes, prefix: str, source_url: str) -> str | None:
             Key=key,
             Body=img_bytes,
             ContentType="image/jpeg",
-            ACL="public-read",
         )
-        return f"{S3_ENDPOINT}/{S3_BUCKET}/{key}"
+        return f"/s3/{key}"
     except Exception as e:
         print(f"  [storage] Upload failed for {prefix}: {e}")
         return None
