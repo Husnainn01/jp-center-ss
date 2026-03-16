@@ -6,7 +6,7 @@ import os
 from playwright.async_api import async_playwright
 from taa_login import taa_login
 from taa_scraper import taa_search_and_extract
-from db import mark_expired, log_sync, get_site_credentials
+from db import mark_expired, log_sync, get_site_credentials, is_site_enabled
 
 
 def get_taa_credentials():
@@ -22,6 +22,10 @@ def get_taa_credentials():
 
 async def run_taa_sync():
     """Full TAA scrape cycle."""
+    if not is_site_enabled("taa"):
+        print("[taa-sync] TAA scraper is DISABLED. Skipping.")
+        return
+
     start = time.time()
     print("[taa-sync] Starting TAA sync...")
 

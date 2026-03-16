@@ -167,3 +167,16 @@ def get_site_credentials(site_id: str) -> tuple[str, str]:
 def get_credentials() -> tuple[str, str]:
     """Get Aucnet credentials from auction_sites table."""
     return get_site_credentials("aucnet")
+
+
+def is_site_enabled(site_id: str) -> bool:
+    """Check if an auction site is enabled."""
+    session = Session()
+    try:
+        row = session.execute(
+            text("SELECT is_enabled FROM auction_sites WHERE id = :site_id"),
+            {"site_id": site_id},
+        ).fetchone()
+        return bool(row and row[0])
+    finally:
+        session.close()

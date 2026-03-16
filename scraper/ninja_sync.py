@@ -6,10 +6,14 @@ import os
 from playwright.async_api import async_playwright
 from ninja_login import ninja_login
 from ninja_scraper import ninja_search_and_extract
-from db import log_sync, get_site_credentials
+from db import log_sync, get_site_credentials, is_site_enabled
 
 
 async def run_ninja_sync():
+    if not is_site_enabled("uss"):
+        print("[ninja-sync] USS/NINJA scraper is DISABLED. Skipping.")
+        return
+
     start = time.time()
     print("[ninja-sync] Starting USS/NINJA sync...")
 

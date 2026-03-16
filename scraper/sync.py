@@ -7,11 +7,15 @@ from playwright.async_api import async_playwright
 
 from login import ensure_session
 from scraper import search_and_extract_all
-from db import mark_expired, log_sync, get_credentials
+from db import mark_expired, log_sync, get_credentials, is_site_enabled
 
 
 async def run_sync():
     """Run a full scrape → sync cycle. Data is saved per-chunk inside the scraper."""
+    if not is_site_enabled("aucnet"):
+        print("[sync] Aucnet scraper is DISABLED. Skipping.")
+        return
+
     start = time.time()
     print("[sync] Starting sync cycle...")
 
