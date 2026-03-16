@@ -20,12 +20,9 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
 
     # Navigate to search via nav image
     print("  [taa] Navigating to search...")
-    await page.evaluate("""() => {
-        const img = document.querySelector('img[name="navi01"]');
-        if (img) img.closest('a')?.click();
-    }""")
+    await page.click('img[name="navi01"]')
     await page.wait_for_load_state("networkidle", timeout=30000)
-    await asyncio.sleep(3)
+    await asyncio.sleep(5)
 
     if "CarMakerSelect" not in page.url:
         print(f"  [taa] Failed to reach search page: {page.url}")
@@ -285,35 +282,27 @@ async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx:
 
 
 def _parse_taa_detail(raw: str, data: dict) -> dict:
-    """Parse TAA detail popup text into structured vehicle data."""
+    """Parse TAA detail popup text (English version) into structured vehicle data."""
     import re
 
     lines = [l.strip() for l in raw.split("\n") if l.strip()]
 
-    # Extract title (model name)
+    # Extract title (model name) from "Next ( MODEL ) >>"
     title = data.get("title", "")
     parts = title.split() if title else []
     maker = parts[0] if len(parts) > 0 else ""
     model = " ".join(parts[1:]) if len(parts) > 1 else title
 
-    # Find key fields from text lines
+    # Find field value after a keyword label
     def find_after(keyword):
         for i, line in enumerate(lines):
-            if keyword in line and i + 1 < len(lines):
+            if keyword.lower() in line.lower() and i + 1 < len(lines):
                 return lines[i + 1]
         return None
 
-    # Parse from known patterns in the text
     date_str = ""
     hall = ""
     ref_no = ""
-    year = ""
-    model_code = ""
-    mileage = ""
-    color = ""
-    rating = ""
-    start_price = ""
-    inspection = ""
 
     if data.get("date_match"):
         dm = data["date_match"]
@@ -324,39 +313,59 @@ def _parse_taa_detail(raw: str, data: dict) -> dict:
         rm = data["ref_match"]
         ref_no = f"{rm.get('lane', '')}{rm.get('ref_no', '')}"
 
-    # Search lines for patterns
+    # Extract fields from English text
+    year = ""
+    model_code = ""
+    mileage = ""
+    color = ""
+    rating = ""
+    start_price = ""
+    inspection = ""
+
     for i, line in enumerate(lines):
-        # Year pattern: 29/9 or R7/5
-        if re.match(r'^\d{2}/\d{1,2}$', line):
+        # Year: 29/9 or R7/5
+        if re.match(r'^\d{2}/\d{1,2}$', line) and not year:
             year = line
-        # Model code
-        if re.match(r'^[A-Z]{2,3}\d{2,3}', line) and len(line) < 15:
+        # Model code: like GRS182, NZE161 etc.
+        if re.match(r'^[A-Z]{2,4}\d{2,4}', line) and len(line) < 15 and not model_code:
             model_code = line
-        # Mileage (pure number < 999)
-        if re.match(r'^\d{1,3}$', line) and 1 < int(line) < 500:
-            mileage = f"{line}千km"
-        # Start price
-        if re.match(r'^\d{1,4}$', line) and "Start Price" in raw[:raw.index(line) if line in raw else 0:]:
-            start_price = line
-        # Inspection
-        if re.match(r'^\d{1,2}/\d{1,2}$', line) and i > 0 and "Inspection" in " ".join(lines[max(0,i-3):i]):
-            inspection = line
+        # Mileage: number followed by km or just a small number
+        if re.match(r'^\d{1,3}$', line) and 1 < int(line) < 500 and not mileage:
+            mileage = f"{int(line) * 1000}km"
 
-    # Search for color and rating in specific patterns
-    color_match = re.search(r'([A-Z0-9]{2,4})\n\s*(ｼﾛ|ｸﾛ|ｼﾙﾊﾞｰ|ﾚｯﾄﾞ|ﾌﾞﾙｰ|ｸﾞﾘｰﾝ|ﾊﾟｰﾙ|ｺﾞｰﾙﾄﾞ|ｸﾞﾚｰ|ﾍﾞｰｼﾞｭ|ﾌﾞﾗｳﾝ|ﾎﾜｲﾄ)', raw)
+    # Color: look for English color names or color codes
+    color_match = re.search(r'(?:Color|Colour|Body color)[:\s]*([^\n]+)', raw, re.IGNORECASE)
     if color_match:
-        color = f"{color_match.group(1)} {color_match.group(2)}"
+        color = color_match.group(1).strip()
+    else:
+        # Try color code pattern: "W" or "1F7" near known color words
+        for line in lines:
+            if re.match(r'^(White|Black|Silver|Red|Blue|Green|Pearl|Gold|Gray|Grey|Beige|Brown)', line, re.IGNORECASE):
+                color = line
+                break
 
-    rating_match = re.search(r'([RSR小大]?小?)\n\s*([A-Z]/[A-Z])', raw)
-    if rating_match:
-        rating = f"{rating_match.group(1)} {rating_match.group(2)}".strip()
+    # Rating/score
+    score_match = re.search(r'(?:Score|Rating|Evaluation)[:\s]*([^\n]+)', raw, re.IGNORECASE)
+    if score_match:
+        rating = score_match.group(1).strip()
+    else:
+        # Pattern like "3.5" or "4" or "R" or "A/B"
+        rating_match = re.search(r'\b([RS\d]\.?\d?)\s*/\s*([A-Z])\b', raw)
+        if rating_match:
+            rating = f"{rating_match.group(1)}/{rating_match.group(2)}"
 
-    # Build unique ID from hall + date + ref
+    # Start price
+    price_match = re.search(r'(?:Start\s*Price|Starting)[:\s]*([\d,]+)', raw, re.IGNORECASE)
+    if price_match:
+        start_price = price_match.group(1).replace(",", "")
+
+    # Inspection
+    insp_match = re.search(r'(?:Inspection|Shaken)[:\s]*(\d{1,2}/\d{1,2})', raw, re.IGNORECASE)
+    if insp_match:
+        inspection = insp_match.group(1)
+
+    # Build unique ID
     item_id = f"taa-{hall}-{ref_no}-{date_str}".replace("/", "")
-
-    # Get images
-    car_images = data.get("car_images", [])
-    exhibit_sheet = data.get("exhibit_sheet")
 
     return {
         "item_id": item_id,
@@ -376,8 +385,8 @@ def _parse_taa_detail(raw: str, data: dict) -> dict:
         "auction_house": f"TAA {hall}" if hall else "TAA",
         "location": hall,
         "status": "upcoming",
-        "image_url": car_images[0] if car_images else None,
-        "images": car_images,
-        "exhibit_sheet": exhibit_sheet,
+        "image_url": None,
+        "images": [],
+        "exhibit_sheet": None,
         "source": "taa",
     }
