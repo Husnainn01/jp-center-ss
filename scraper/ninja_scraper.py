@@ -1,4 +1,5 @@
-"""USS/NINJA scraper: maker-by-maker, open each detail page for ALL images + auction sheet.
+"""USS/NINJA scraper: maker-by-maker, model-by-model for large makers.
+Opens each detail page for ALL images + auction sheet.
 Chunk-based: saves each page of results to DB immediately."""
 
 import asyncio
@@ -26,9 +27,10 @@ async def ninja_search_and_extract(context: BrowserContext) -> list[str]:
         try:
             ids = await _scrape_maker(page, context, maker)
             all_ids.extend(ids)
-            print(f"  [ninja] {maker}: {len(ids)} vehicles")
+            print(f"  [ninja] {maker}: {len(ids)} vehicles total")
         except Exception as e:
             print(f"  [ninja] {maker} failed: {e}")
+            # Try to recover by going back to search
             try:
                 await page.evaluate("() => seniToSearchcondition()")
                 await page.wait_for_load_state("networkidle", timeout=15000)
@@ -41,6 +43,8 @@ async def ninja_search_and_extract(context: BrowserContext) -> list[str]:
 
 
 async def _scrape_maker(page: Page, context: BrowserContext, maker: str) -> list[str]:
+    """Scrape all vehicles for a maker. If >1000, break down by model."""
+
     # Navigate to search
     await page.evaluate("() => seniToSearchcondition()")
     await page.wait_for_load_state("networkidle", timeout=15000)
@@ -54,56 +58,78 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str) -> list
     await page.wait_for_load_state("networkidle", timeout=15000)
     await asyncio.sleep(3)
 
-    # Search → model page → try all models first
-    await page.evaluate("() => conditionSearch()")
-    await page.wait_for_load_state("networkidle", timeout=15000)
-    await asyncio.sleep(3)
-
-    # Get list of individual models in case we need to search one by one
-    model_links = await page.evaluate("""() => {
-        const links = [];
+    # Get all models with their counts and IDs
+    models = await page.evaluate("""() => {
+        const models = [];
         document.querySelectorAll('a').forEach(a => {
             const onclick = a.getAttribute('onclick') || '';
-            if (onclick.includes('modelSearch') || onclick.includes('conditionSearch')) return;
-            const text = a.textContent.trim();
-            if (text.startsWith('・') && text.length > 1) {
-                links.push(text);
+            const match = onclick.match(/makerListChoiceCarCat\\('(\\d+)'\\)/);
+            if (match) {
+                const text = a.textContent.trim();
+                const countMatch = text.match(/(.+?)\\s*\\((\\d+)\\)/);
+                if (countMatch && parseInt(countMatch[2]) > 0) {
+                    models.push({ name: countMatch[1], count: parseInt(countMatch[2]), catId: match[1] });
+                }
             }
         });
-        return links;
+        return models;
     }""")
 
-    await page.evaluate("() => allSearch()")
-    await page.wait_for_load_state("networkidle", timeout=30000)
-    await asyncio.sleep(8)
+    total_available = sum(m["count"] for m in models)
+    print(f"  [ninja] {maker}: {len(models)} models, {total_available} vehicles available")
 
-    body = await page.inner_text("body")
-    if "more than 1,000" in body.lower() or "1,000items" in body.lower():
-        print(f"  [ninja] {maker}: >1000 vehicles, searching model by model ({len(model_links)} models)...")
-        all_ids = []
-        for model_name in model_links:
-            try:
-                ids = await _scrape_maker_model(page, context, maker, model_name)
-                all_ids.extend(ids)
-                print(f"  [ninja] {maker} {model_name}: {len(ids)} vehicles")
-            except Exception as e:
-                print(f"  [ninja] {maker} {model_name} failed: {e}")
-                try:
-                    await page.evaluate("() => seniToSearchcondition()")
-                    await page.wait_for_load_state("networkidle", timeout=15000)
-                    await asyncio.sleep(3)
-                except:
-                    pass
-        return all_ids
+    if total_available == 0:
+        return []
 
-    # Normal flow: <1000 vehicles, paginate through results
+    # Select all body types
+    await page.evaluate("""() => {
+        document.querySelectorAll('input[name="bodytype"]').forEach(cb => {
+            if (!cb.checked) cb.click();
+        });
+    }""")
+    await asyncio.sleep(0.5)
+
+    # Try allSearch first if total < 1000
+    if total_available < 1000:
+        try:
+            await page.evaluate("() => allSearch()")
+            await page.wait_for_load_state("networkidle", timeout=30000)
+            await asyncio.sleep(8)
+
+            body = await page.inner_text("body")
+            if "more than 1,000" not in body.lower() and "1,000items" not in body.lower():
+                return await _paginate_results(page, context, maker)
+        except Exception as e:
+            print(f"  [ninja] {maker} allSearch failed: {e}")
+
+    # >1000 or allSearch failed: search model by model
+    print(f"  [ninja] {maker}: searching model by model...")
     all_ids = []
-    all_ids = await _paginate_results(page, context, maker, all_ids)
+
+    for model in models:
+        if model["count"] == 0:
+            continue
+
+        try:
+            ids = await _scrape_single_model(page, context, maker, model)
+            all_ids.extend(ids)
+            if ids:
+                print(f"  [ninja] {maker} > {model['name']}: {len(ids)} vehicles")
+        except Exception as e:
+            print(f"  [ninja] {maker} > {model['name']} failed: {e}")
+            try:
+                await page.evaluate("() => seniToSearchcondition()")
+                await page.wait_for_load_state("networkidle", timeout=15000)
+                await asyncio.sleep(3)
+            except:
+                pass
+
     return all_ids
 
 
-async def _scrape_maker_model(page: Page, context: BrowserContext, maker: str, model_name: str) -> list[str]:
-    """Search for a specific maker+model combination when maker has >1000 vehicles."""
+async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, model: dict) -> list[str]:
+    """Search for a single maker+model combination."""
+    # Go to search page
     await page.evaluate("() => seniToSearchcondition()")
     await page.wait_for_load_state("networkidle", timeout=15000)
     await asyncio.sleep(2)
@@ -114,36 +140,38 @@ async def _scrape_maker_model(page: Page, context: BrowserContext, maker: str, m
             if (a.textContent.trim() === '・{maker}') {{ a.click(); return; }}
     }}""")
     await page.wait_for_load_state("networkidle", timeout=15000)
-    await asyncio.sleep(3)
+    await asyncio.sleep(2)
 
-    # Go to model selection
-    await page.evaluate("() => conditionSearch()")
-    await page.wait_for_load_state("networkidle", timeout=15000)
-    await asyncio.sleep(3)
+    # Select all body types
+    await page.evaluate("""() => {
+        document.querySelectorAll('input[name="bodytype"]').forEach(cb => {
+            if (!cb.checked) cb.click();
+        });
+    }""")
+    await asyncio.sleep(0.5)
 
     # Click specific model
-    await page.evaluate(f"""() => {{
-        for (const a of document.querySelectorAll('a'))
-            if (a.textContent.trim() === '{model_name}') {{ a.click(); return; }}
-    }}""")
+    cat_id = model["catId"]
+    await page.evaluate(f"() => makerListChoiceCarCat('{cat_id}')")
     await page.wait_for_load_state("networkidle", timeout=15000)
     await asyncio.sleep(3)
 
-    # Search with this model
-    await page.evaluate("() => allSearch()")
+    # Click search for this model
+    await page.evaluate("() => makerListCheckSearch()")
     await page.wait_for_load_state("networkidle", timeout=30000)
     await asyncio.sleep(8)
 
     body = await page.inner_text("body")
     if "more than 1,000" in body.lower() or "1,000items" in body.lower():
-        print(f"  [ninja] {maker} {model_name}: still >1000, skipping this model")
+        print(f"  [ninja] {maker} > {model['name']}: still >1000, skipping")
         return []
 
-    return await _paginate_results(page, context, maker, [])
+    return await _paginate_results(page, context, maker)
 
 
-async def _paginate_results(page: Page, context: BrowserContext, maker: str, all_ids: list) -> list[str]:
+async def _paginate_results(page: Page, context: BrowserContext, maker: str) -> list[str]:
     """Paginate through search results, extracting vehicles page by page."""
+    all_ids = []
     page_num = 0
 
     while True:
@@ -174,9 +202,13 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, all
 
         vehicles = []
         for vp in vehicle_params:
-            v = await _extract_vehicle_detail(page, context, vp, maker)
-            if v and v.get("item_id"):
-                vehicles.append(v)
+            try:
+                v = await _extract_vehicle_detail(page, context, vp, maker)
+                if v and v.get("item_id"):
+                    vehicles.append(v)
+            except Exception as e:
+                print(f"  [ninja] Detail extraction failed: {e}")
+                continue
 
         if vehicles:
             result = upsert_auctions(vehicles)
@@ -202,12 +234,10 @@ async def _extract_vehicle_detail(page: Page, context: BrowserContext, params: d
     try:
         idx, site, times, bid_no = params["index"], params["site"], params["times"], params["bidNo"]
 
-        # Click to open detail (navigates same page, no popup)
         await page.evaluate(f"() => seniCarDetail('{idx}', '{site}', '{times}', '{bid_no}', '')")
         await page.wait_for_load_state("networkidle", timeout=15000)
         await asyncio.sleep(4)
 
-        # Extract text data
         text = await page.inner_text("body")
 
         # Extract ALL images
@@ -229,22 +259,21 @@ async def _extract_vehicle_detail(page: Page, context: BrowserContext, params: d
             return { car, sheet };
         }""")
 
-        # Download car images
+        # Upload car images to S3
         car_images = []
         for url in imgs_data.get("car", []):
-            path = await _download_image(page, url)
+            path = await _download_and_upload(page, url, "ninja-images")
             if path:
                 car_images.append(path)
 
-        # Download auction sheet
+        # Upload auction sheet
         exhibit_sheet = None
         for url in imgs_data.get("sheet", []):
-            path = await _download_image(page, url)
+            path = await _download_and_upload(page, url, "ninja-images")
             if path:
                 exhibit_sheet = path
                 break
 
-        # Parse vehicle data from text
         vehicle = _parse_detail_text(text, maker, site, bid_no, times)
         vehicle["images"] = car_images
         vehicle["image_url"] = car_images[0] if car_images else None
@@ -264,7 +293,6 @@ async def _extract_vehicle_detail(page: Page, context: BrowserContext, params: d
         return vehicle
 
     except Exception as e:
-        # Try to go back
         try:
             await page.go_back()
             await page.wait_for_load_state("networkidle", timeout=10000)
@@ -278,7 +306,6 @@ def _parse_detail_text(text: str, maker: str, site: str, bid_no: str, times: str
     """Parse vehicle detail page text."""
     lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-    # Find model line (after maker name)
     model = ""
     grade = ""
     for line in lines:
@@ -288,11 +315,9 @@ def _parse_detail_text(text: str, maker: str, site: str, bid_no: str, times: str
             grade = " ".join(parts[1:]) if len(parts) > 1 else ""
             break
 
-    # Parse fields
     def find_field(label):
         for i, line in enumerate(lines):
             if line.startswith(label) or line == label:
-                # Value is often on same line after tab or next line
                 rest = line.replace(label, "").strip()
                 if rest:
                     return rest
@@ -309,10 +334,8 @@ def _parse_detail_text(text: str, maker: str, site: str, bid_no: str, times: str
 
     chassis = find_field("Type") or ""
     color = find_field("Body color") or ""
-    transmission = find_field("Transmission") or ""
 
     price_raw = price_match.group(1).replace(",", "") if price_match else None
-    # Convert JPY to 万円 format (divide by 10000) since db.py multiplies back
     start_price = str(int(price_raw) / 10000) if price_raw else None
 
     item_id = f"uss-{bid_no}-{date_match.group(1).replace('/', '') if date_match else times}"
@@ -342,7 +365,8 @@ def _parse_detail_text(text: str, maker: str, site: str, bid_no: str, times: str
     }
 
 
-async def _download_image(page: Page, url: str) -> str | None:
+async def _download_and_upload(page: Page, url: str, prefix: str) -> str | None:
+    """Download image via browser fetch and upload to S3."""
     try:
         result = await page.evaluate("""async (url) => {
             try {
@@ -358,7 +382,7 @@ async def _download_image(page: Page, url: str) -> str | None:
             b64 = result.split(",", 1)[1]
             img_bytes = base64.b64decode(b64)
             if len(img_bytes) > 500:
-                s3_url = upload_image(img_bytes, "ninja-images", url)
+                s3_url = upload_image(img_bytes, prefix, url)
                 if s3_url:
                     return s3_url
         return None
