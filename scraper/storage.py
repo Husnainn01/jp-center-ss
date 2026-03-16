@@ -12,10 +12,14 @@ S3_BUCKET = os.getenv("S3_BUCKET") or os.getenv("BUCKET_NAME", "durable-briefcas
 S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY") or os.getenv("AWS_ACCESS_KEY_ID", "")
 S3_SECRET_KEY = os.getenv("S3_SECRET_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY", "")
 
+S3_ACCESS_KEY = S3_ACCESS_KEY.strip()
+S3_SECRET_KEY = S3_SECRET_KEY.strip()
+
 print(f"  [storage] Endpoint: {S3_ENDPOINT}")
 print(f"  [storage] Bucket: {S3_BUCKET}")
-print(f"  [storage] Access key: {S3_ACCESS_KEY[:10]}..." if S3_ACCESS_KEY else "  [storage] Access key: NOT SET")
-print(f"  [storage] Secret key: {'set (' + str(len(S3_SECRET_KEY)) + ' chars)' if S3_SECRET_KEY else 'NOT SET'}")
+print(f"  [storage] Access key: {S3_ACCESS_KEY[:10]}... ({len(S3_ACCESS_KEY)} chars)")
+print(f"  [storage] Secret key: ...{S3_SECRET_KEY[-10:]} ({len(S3_SECRET_KEY)} chars)")
+print(f"  [storage] Secret has +: {'+' in S3_SECRET_KEY}")
 
 _client = None
 
