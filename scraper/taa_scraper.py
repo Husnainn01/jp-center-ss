@@ -40,18 +40,31 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
             if (!shouldCheck && cb.checked) cb.click();
         });
     }""", DAYS)
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
+
+    day_count = await page.evaluate("() => document.querySelectorAll('input[name=\"checkHallYobi\"]:checked').length")
+    print(f"  [taa] Selected {day_count} days")
 
     # Select all makers
     await page.evaluate("() => document.querySelectorAll('input[name=\"carMakerArr\"]').forEach(cb => { if(!cb.checked) cb.click(); })")
-    await asyncio.sleep(2)
+
+    # Wait for models to load after maker selection
+    for i in range(10):
+        await asyncio.sleep(2)
+        model_count = await page.evaluate("() => document.querySelectorAll('input[name=\"syasyu2\"]').length")
+        if model_count > 0:
+            break
+        print(f"  [taa] Waiting for models to load... ({i+1})")
+
+    maker_count = await page.evaluate("() => document.querySelectorAll('input[name=\"carMakerArr\"]:checked').length")
+    print(f"  [taa] Selected {maker_count} makers, {model_count} models available")
 
     # Select all models
     await page.evaluate("() => document.querySelectorAll('input[name=\"syasyu2\"]').forEach(cb => { if(!cb.checked) cb.click(); })")
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
-    model_count = await page.evaluate("() => document.querySelectorAll('input[name=\"syasyu2\"]:checked').length")
-    print(f"  [taa] Selected {model_count} models for {DAYS}")
+    checked_models = await page.evaluate("() => document.querySelectorAll('input[name=\"syasyu2\"]:checked').length")
+    print(f"  [taa] Checked {checked_models} models for {DAYS}")
 
     # Submit search
     await page.evaluate("""() => {
