@@ -16,6 +16,11 @@ const s3 = new S3Client({
 
 const BUCKET = process.env.S3_BUCKET || "durable-briefcase-4cwl3t7";
 
+console.log(`[images] S3 endpoint: ${process.env.S3_ENDPOINT || "NOT SET"}`);
+console.log(`[images] S3 bucket: ${BUCKET}`);
+console.log(`[images] S3 access key: ${(process.env.S3_ACCESS_KEY || "").substring(0, 10)}... (${(process.env.S3_ACCESS_KEY || "").length} chars)`);
+console.log(`[images] S3 secret key: ${(process.env.S3_SECRET_KEY || "").length} chars`);
+
 // GET /s3/:prefix/:filename — proxy S3 images with auth
 imagesRouter.get("/:prefix/:filename", async (req, res) => {
   const { prefix, filename } = req.params;
