@@ -5,7 +5,7 @@ import { Readable } from "stream";
 export const imagesRouter = Router();
 
 const s3 = new S3Client({
-  endpoint: process.env.S3_ENDPOINT || "https://t3.storageapi.dev",
+  endpoint: process.env.S3_ENDPOINT || "https://dffe00b2c327c69b4a869d74b4e7a2a2.r2.cloudflarestorage.com",
   region: "auto",
   credentials: {
     accessKeyId: process.env.S3_ACCESS_KEY || "",
@@ -14,7 +14,7 @@ const s3 = new S3Client({
   forcePathStyle: true,
 });
 
-const BUCKET = process.env.S3_BUCKET || "durable-briefcase-4cwl3t7";
+const BUCKET = process.env.S3_BUCKET || "jpcenter";
 
 console.log(`[images] S3 endpoint: ${process.env.S3_ENDPOINT || "NOT SET"}`);
 console.log(`[images] S3 bucket: ${BUCKET}`);

@@ -6,9 +6,9 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-# Support both our naming and Railway's default naming
-S3_ENDPOINT = os.getenv("S3_ENDPOINT") or os.getenv("AWS_ENDPOINT_URL", "https://t3.storageapi.dev")
-S3_BUCKET = os.getenv("S3_BUCKET") or os.getenv("BUCKET_NAME", "durable-briefcase-4cwl3t7")
+# Cloudflare R2 storage
+S3_ENDPOINT = os.getenv("S3_ENDPOINT", "https://dffe00b2c327c69b4a869d74b4e7a2a2.r2.cloudflarestorage.com")
+S3_BUCKET = os.getenv("S3_BUCKET", "jpcenter")
 S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY") or os.getenv("AWS_ACCESS_KEY_ID", "")
 S3_SECRET_KEY = os.getenv("S3_SECRET_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY", "")
 
