@@ -1,22 +1,26 @@
-"""TAA scraper: search → paginate → open each detail popup → extract data + download images.
-Chunk-based: saves each page of results to DB immediately.
-Images are downloaded locally since TAA requires auth cookies."""
+"""TAA scraper: search → paginate → open detail popups (parallel) → extract data + upload images.
+Optimized: parallel popup extraction (3 concurrent), skip existing vehicles.
+Chunk-based: saves each page of results to DB immediately."""
 
 import asyncio
 import os
 import hashlib
 import base64
+import re
 from playwright.async_api import Page, BrowserContext
-from db import upsert_auctions
+from db import upsert_auctions, get_existing_item_ids
 from storage import upload_image
 
-# Days to scrape — checkHallYobi checkboxes
-DAYS = ["mon", "tue", "wed", "thu", "fri", "sat"]
+MAX_CONCURRENT_POPUPS = 3
 
 
 async def taa_search_and_extract(context: BrowserContext) -> list[str]:
     """Full TAA scrape flow. Returns list of scraped item_ids."""
     page = context.pages[0] if context.pages else await context.new_page()
+
+    # Load existing vehicle IDs to skip re-scraping
+    existing_ids = get_existing_item_ids("taa")
+    print(f"  [taa] {len(existing_ids)} existing vehicles in DB (will skip)")
 
     # Navigate to search via nav image
     print("  [taa] Navigating to search...")
@@ -43,6 +47,7 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
     await page.evaluate("() => document.querySelectorAll('input[name=\"carMakerArr\"]').forEach(cb => { if(!cb.checked) cb.click(); })")
 
     # Wait for models to load after maker selection
+    model_count = 0
     for i in range(10):
         await asyncio.sleep(2)
         model_count = await page.evaluate("() => document.querySelectorAll('input[name=\"syasyu2\"]').length")
@@ -58,7 +63,7 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
     await asyncio.sleep(2)
 
     checked_models = await page.evaluate("() => document.querySelectorAll('input[name=\"syasyu2\"]:checked').length")
-    print(f"  [taa] Checked {checked_models} models for {DAYS}")
+    print(f"  [taa] Checked {checked_models} models")
 
     # Submit search
     await page.evaluate("""() => {
@@ -88,12 +93,12 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
     # Paginate and extract
     all_ids = []
     page_num = 0
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_POPUPS)
 
     while True:
         page_num += 1
-        print(f"  [taa] Page {page_num} — extracting list...")
 
-        # Get vehicle refs from this page (popDetail indices)
+        # Get vehicle count on this page
         vehicle_count = await page.evaluate("""() => {
             const links = document.querySelectorAll('a[href*="popDetail"]');
             const ids = new Set();
@@ -107,18 +112,27 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
         if vehicle_count == 0:
             break
 
-        # Extract each vehicle's detail by opening popup
-        vehicles = []
-        for idx in range(1, vehicle_count + 1):
-            v = await _extract_vehicle_detail(context, page, idx)
-            if v:
-                vehicles.append(v)
+        print(f"  [taa] Page {page_num}: {vehicle_count} vehicles on page")
+
+        # Extract vehicles in parallel using popups
+        async def extract_one(idx):
+            async with semaphore:
+                return await _extract_vehicle_detail(context, page, idx, existing_ids)
+
+        results = await asyncio.gather(*[extract_one(idx) for idx in range(1, vehicle_count + 1)])
+        vehicles = [v for v in results if v]
 
         if vehicles:
             result = upsert_auctions(vehicles)
             all_ids.extend(v["item_id"] for v in vehicles)
+            existing_ids.update(v["item_id"] for v in vehicles)
             pct = len(all_ids) / total * 100 if total else 0
-            print(f"  [taa] Page {page_num}: {len(vehicles)} vehicles → DB (new:{result['new']}) | {len(all_ids)}/{total} ({pct:.1f}%)")
+            print(f"  [taa] Page {page_num}: {len(vehicles)} → DB (new:{result['new']}) | {len(all_ids)}/{total} ({pct:.1f}%)")
+        else:
+            # Count skipped
+            skipped = vehicle_count - len(vehicles)
+            if skipped > 0:
+                print(f"  [taa] Page {page_num}: {skipped} skipped (existing)")
 
         if len(all_ids) >= total:
             break
@@ -140,33 +154,30 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
             break
 
         await page.wait_for_load_state("networkidle", timeout=30000)
-        await asyncio.sleep(3)
+        await asyncio.sleep(2)
 
     print(f"  [taa] Done: {len(all_ids)} vehicles across {page_num} pages")
     return all_ids
 
 
-async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx: int) -> dict | None:
-    """Open vehicle detail popup, extract data, download images locally, close popup."""
+async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx: int, existing_ids: set) -> dict | None:
+    """Open vehicle detail popup, extract data, upload images, close popup."""
+    popup = None
     try:
         async with context.expect_page(timeout=10000) as popup_info:
             await list_page.evaluate(f"() => popDetail({idx})")
 
         popup = await popup_info.value
         await popup.wait_for_load_state("networkidle", timeout=15000)
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
         # Extract data + image URLs from the popup
         data = await popup.evaluate("""() => {
             const allText = document.body.innerText;
 
-            // Title from "Next ( MODEL ) >>"
             const modelMatch = allText.match(/Next \\( (.+?) \\)/);
             const title = modelMatch ? modelMatch[1] : '';
 
-            // ALL images — smart quality selection per section
-            // B,C = _4 exists (10KB, decent), D-J = only _1 (4KB, small)
-            // A = auction sheet, use carImageFile.do?path= with _5 (36KB, clear)
             const carImageUrls = [];
             const sheetUrls = [];
             const seenSections = new Set();
@@ -175,7 +186,6 @@ async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx:
                 const src = img.src || '';
                 if (!src || !src.includes('/data/img/')) return;
 
-                // Parse: /data/img/{date}/{hall}/{section}/{section}{ref}_{size}.jpg
                 const match = src.match(/(\\/data\\/img\\/[^/]+\\/[^/]+)\\/([A-J])\\/([A-J][^_]+)_\\d\\.jpg/);
                 if (!match) return;
 
@@ -187,18 +197,14 @@ async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx:
                 seenSections.add(section);
 
                 if (section === 'A') {
-                    // Auction sheet — use carImageFile.do wrapper with _5 for best quality
                     sheetUrls.push('https://taacaa.jp/app/common/carImageFile.do?path=' + basePath + '/A/' + fileBase + '_5.jpg');
                 } else if (section === 'B' || section === 'C') {
-                    // Front/rear — _4 exists and is 10KB (decent)
                     carImageUrls.push('https://taacaa.jp' + basePath + '/' + section + '/' + fileBase + '_4.jpg');
                 } else {
-                    // D-J sections — only _1 exists (4KB thumbnail)
                     carImageUrls.push('https://taacaa.jp' + basePath + '/' + section + '/' + fileBase + '_1.jpg');
                 }
             });
 
-            // Ref and date
             const refMatch = allText.match(/([A-Z])\\n\\s*(\\d{5})/);
             const dateMatch = allText.match(/(\\d+\\/\\d+)[（(](\\w+)[)）]\\n\\s*(\\w+)/);
 
@@ -216,11 +222,19 @@ async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx:
             await popup.close()
             return None
 
-        # Download images through the authenticated browser session
-        async def download_image(page: Page, url: str) -> str | None:
-            """Download image via browser fetch, upload to S3."""
+        # Build item_id early to check if we can skip
+        raw = data.get("raw_text", "")
+        vehicle = _parse_taa_detail(raw, data)
+        item_id = vehicle["item_id"]
+
+        if item_id in existing_ids:
+            await popup.close()
+            return None  # Skip — already in DB
+
+        # Upload images in parallel
+        async def download_and_upload(url: str) -> str | None:
             try:
-                result = await page.evaluate("""async (url) => {
+                result = await popup.evaluate("""async (url) => {
                     try {
                         const res = await fetch(url, { credentials: 'include' });
                         if (!res.ok) return null;
@@ -237,60 +251,58 @@ async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx:
                     b64 = result.split(",", 1)[1]
                     img_bytes = base64.b64decode(b64)
                     if len(img_bytes) > 500:
-                        s3_url = upload_image(img_bytes, "taa-images", url)
-                        if s3_url:
-                            return s3_url
+                        return upload_image(img_bytes, "taa-images", url)
                 return None
             except:
                 return None
 
-        # Download car images
-        car_images = []
-        for url in data.get("car_image_urls", []):
-            local = await download_image(popup, url)
-            if local and local not in car_images:
-                car_images.append(local)
-            if len(car_images) >= 10:
-                break  # Cap at 10 images per vehicle
+        # Parallel image uploads
+        car_urls = data.get("car_image_urls", [])[:10]
+        car_tasks = [download_and_upload(url) for url in car_urls]
+        car_results = await asyncio.gather(*car_tasks) if car_tasks else []
+        car_images = [r for r in car_results if r]
 
-        # Download auction sheet
         exhibit_sheet = None
         for url in data.get("sheet_urls", []):
-            local = await download_image(popup, url)
-            if local:
-                exhibit_sheet = local
+            path = await download_and_upload(url)
+            if path:
+                exhibit_sheet = path
                 break
 
         await popup.close()
 
-        # Parse text fields
-        raw = data.get("raw_text", "")
-        vehicle = _parse_taa_detail(raw, data)
         vehicle["images"] = car_images
         vehicle["image_url"] = car_images[0] if car_images else None
         vehicle["exhibit_sheet"] = exhibit_sheet
         return vehicle
 
     except Exception as e:
-        for pg in context.pages:
-            if "carDetail" in pg.url:
-                await pg.close()
+        # Close any lingering popups
+        if popup:
+            try:
+                await popup.close()
+            except:
+                pass
+        else:
+            for pg in context.pages:
+                if "carDetail" in pg.url:
+                    try:
+                        await pg.close()
+                    except:
+                        pass
         return None
 
 
 def _parse_taa_detail(raw: str, data: dict) -> dict:
     """Parse TAA detail popup text (English version) into structured vehicle data."""
-    import re
 
     lines = [l.strip() for l in raw.split("\n") if l.strip()]
 
-    # Extract title (model name) from "Next ( MODEL ) >>"
     title = data.get("title", "")
     parts = title.split() if title else []
     maker = parts[0] if len(parts) > 0 else ""
     model = " ".join(parts[1:]) if len(parts) > 1 else title
 
-    # Find field value after a keyword label
     def find_after(keyword):
         for i, line in enumerate(lines):
             if keyword.lower() in line.lower() and i + 1 < len(lines):
@@ -310,7 +322,6 @@ def _parse_taa_detail(raw: str, data: dict) -> dict:
         rm = data["ref_match"]
         ref_no = f"{rm.get('lane', '')}{rm.get('ref_no', '')}"
 
-    # Extract fields from English text
     year = ""
     model_code = ""
     mileage = ""
@@ -320,48 +331,38 @@ def _parse_taa_detail(raw: str, data: dict) -> dict:
     inspection = ""
 
     for i, line in enumerate(lines):
-        # Year: 29/9 or R7/5
         if re.match(r'^\d{2}/\d{1,2}$', line) and not year:
             year = line
-        # Model code: like GRS182, NZE161 etc.
         if re.match(r'^[A-Z]{2,4}\d{2,4}', line) and len(line) < 15 and not model_code:
             model_code = line
-        # Mileage: number followed by km or just a small number
         if re.match(r'^\d{1,3}$', line) and 1 < int(line) < 500 and not mileage:
             mileage = f"{int(line) * 1000}km"
 
-    # Color: look for English color names or color codes
     color_match = re.search(r'(?:Color|Colour|Body color)[:\s]*([^\n]+)', raw, re.IGNORECASE)
     if color_match:
         color = color_match.group(1).strip()
     else:
-        # Try color code pattern: "W" or "1F7" near known color words
         for line in lines:
             if re.match(r'^(White|Black|Silver|Red|Blue|Green|Pearl|Gold|Gray|Grey|Beige|Brown)', line, re.IGNORECASE):
                 color = line
                 break
 
-    # Rating/score
     score_match = re.search(r'(?:Score|Rating|Evaluation)[:\s]*([^\n]+)', raw, re.IGNORECASE)
     if score_match:
         rating = score_match.group(1).strip()
     else:
-        # Pattern like "3.5" or "4" or "R" or "A/B"
         rating_match = re.search(r'\b([RS\d]\.?\d?)\s*/\s*([A-Z])\b', raw)
         if rating_match:
             rating = f"{rating_match.group(1)}/{rating_match.group(2)}"
 
-    # Start price
     price_match = re.search(r'(?:Start\s*Price|Starting)[:\s]*([\d,]+)', raw, re.IGNORECASE)
     if price_match:
         start_price = price_match.group(1).replace(",", "")
 
-    # Inspection
     insp_match = re.search(r'(?:Inspection|Shaken)[:\s]*(\d{1,2}/\d{1,2})', raw, re.IGNORECASE)
     if insp_match:
         inspection = insp_match.group(1)
 
-    # Build unique ID
     item_id = f"taa-{hall}-{ref_no}-{date_str}".replace("/", "")
 
     return {
