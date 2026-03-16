@@ -54,27 +54,101 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str) -> list
     await page.wait_for_load_state("networkidle", timeout=15000)
     await asyncio.sleep(3)
 
-    # Search → model page → all models
+    # Search → model page → try all models first
     await page.evaluate("() => conditionSearch()")
     await page.wait_for_load_state("networkidle", timeout=15000)
     await asyncio.sleep(3)
+
+    # Get list of individual models in case we need to search one by one
+    model_links = await page.evaluate("""() => {
+        const links = [];
+        document.querySelectorAll('a').forEach(a => {
+            const onclick = a.getAttribute('onclick') || '';
+            if (onclick.includes('modelSearch') || onclick.includes('conditionSearch')) return;
+            const text = a.textContent.trim();
+            if (text.startsWith('・') && text.length > 1) {
+                links.push(text);
+            }
+        });
+        return links;
+    }""")
+
     await page.evaluate("() => allSearch()")
     await page.wait_for_load_state("networkidle", timeout=30000)
     await asyncio.sleep(8)
 
     body = await page.inner_text("body")
     if "more than 1,000" in body.lower() or "1,000items" in body.lower():
-        print(f"  [ninja] {maker}: >1000, skipping")
+        print(f"  [ninja] {maker}: >1000 vehicles, searching model by model ({len(model_links)} models)...")
+        all_ids = []
+        for model_name in model_links:
+            try:
+                ids = await _scrape_maker_model(page, context, maker, model_name)
+                all_ids.extend(ids)
+                print(f"  [ninja] {maker} {model_name}: {len(ids)} vehicles")
+            except Exception as e:
+                print(f"  [ninja] {maker} {model_name} failed: {e}")
+                try:
+                    await page.evaluate("() => seniToSearchcondition()")
+                    await page.wait_for_load_state("networkidle", timeout=15000)
+                    await asyncio.sleep(3)
+                except:
+                    pass
+        return all_ids
+
+    # Normal flow: <1000 vehicles, paginate through results
+    all_ids = []
+    all_ids = await _paginate_results(page, context, maker, all_ids)
+    return all_ids
+
+
+async def _scrape_maker_model(page: Page, context: BrowserContext, maker: str, model_name: str) -> list[str]:
+    """Search for a specific maker+model combination when maker has >1000 vehicles."""
+    await page.evaluate("() => seniToSearchcondition()")
+    await page.wait_for_load_state("networkidle", timeout=15000)
+    await asyncio.sleep(2)
+
+    # Click maker
+    await page.evaluate(f"""() => {{
+        for (const a of document.querySelectorAll('a'))
+            if (a.textContent.trim() === '・{maker}') {{ a.click(); return; }}
+    }}""")
+    await page.wait_for_load_state("networkidle", timeout=15000)
+    await asyncio.sleep(3)
+
+    # Go to model selection
+    await page.evaluate("() => conditionSearch()")
+    await page.wait_for_load_state("networkidle", timeout=15000)
+    await asyncio.sleep(3)
+
+    # Click specific model
+    await page.evaluate(f"""() => {{
+        for (const a of document.querySelectorAll('a'))
+            if (a.textContent.trim() === '{model_name}') {{ a.click(); return; }}
+    }}""")
+    await page.wait_for_load_state("networkidle", timeout=15000)
+    await asyncio.sleep(3)
+
+    # Search with this model
+    await page.evaluate("() => allSearch()")
+    await page.wait_for_load_state("networkidle", timeout=30000)
+    await asyncio.sleep(8)
+
+    body = await page.inner_text("body")
+    if "more than 1,000" in body.lower() or "1,000items" in body.lower():
+        print(f"  [ninja] {maker} {model_name}: still >1000, skipping this model")
         return []
 
-    # Get seniCarDetail calls from the page to know how many vehicles + their params
-    all_ids = []
+    return await _paginate_results(page, context, maker, [])
+
+
+async def _paginate_results(page: Page, context: BrowserContext, maker: str, all_ids: list) -> list[str]:
+    """Paginate through search results, extracting vehicles page by page."""
     page_num = 0
 
     while True:
         page_num += 1
 
-        # Get all vehicle detail params from the page
         vehicle_params = await page.evaluate("""() => {
             const params = [];
             const els = document.querySelectorAll('[onclick*=seniCarDetail]');
@@ -83,7 +157,7 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str) -> list
                 const onclick = el.getAttribute('onclick') || '';
                 const match = onclick.match(/seniCarDetail\\('(\\d+)',\\s*'([^']*)',\\s*'([^']*)',\\s*'([^']*)',\\s*'([^']*)'/);
                 if (match) {
-                    const key = match[4]; // bidNo
+                    const key = match[4];
                     if (!seen.has(key)) {
                         seen.add(key);
                         params.push({ index: match[1], site: match[2], times: match[3], bidNo: match[4], extra: match[5] });
@@ -98,7 +172,6 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str) -> list
 
         print(f"  [ninja] {maker} p{page_num}: {len(vehicle_params)} vehicles found")
 
-        # Open each vehicle detail, extract data + ALL images
         vehicles = []
         for vp in vehicle_params:
             v = await _extract_vehicle_detail(page, context, vp, maker)
@@ -111,7 +184,6 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str) -> list
             img_total = sum(len(v.get("images", [])) for v in vehicles)
             print(f"  [ninja] {maker} p{page_num}: {len(vehicles)} → DB (new:{result['new']}, imgs:{img_total})")
 
-        # Next page
         has_next = await page.evaluate("""() => {
             for (const a of document.querySelectorAll('a'))
                 if (a.textContent.trim().includes('Next page')) { a.click(); return true; }
