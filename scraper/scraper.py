@@ -115,6 +115,32 @@ async def search_and_extract_all(page: Page, buy_href: str) -> list[dict]:
     await page.goto(buy_href, wait_until="networkidle", timeout=60000)
     await asyncio.sleep(8)
 
+    # Uncheck all Aucnet special auction types (TV Auction, GOOD VALUE, Shared Inventory, etc.)
+    await page.evaluate("""() => {
+        const skipCheckboxes = [
+            'chk_sel_tvaa',              // TV Auction
+            'chk_sel_good_value',        // GOOD VALUE
+            'chk_sel_rcmnd',             // SAKIDORI / Assessment Direct
+            'chk_sel_wlsale_exhibit_all',// Shared Inventory (ALL)
+            'chk_sel_sel_strike_display',// Ichigeki
+            'chk_sel_estmate',           // Inspected
+            'chk_sel_preliminary_inspection', // Pre-inspection
+        ];
+        skipCheckboxes.forEach(name => {
+            const cb = document.querySelector('input[name="' + name + '"]');
+            if (cb && cb.checked) cb.click();
+        });
+    }""")
+    await asyncio.sleep(1)
+
+    # Select all days (Mon-Sat venue auctions)
+    await page.evaluate("""() => {
+        document.querySelectorAll('.chk_select_all_in_day').forEach(cb => {
+            if (!cb.checked) cb.click();
+        });
+    }""")
+    await asyncio.sleep(1)
+
     # Select all makers
     await page.evaluate("() => document.querySelectorAll('.chk_makers').forEach(c => { if(!c.checked) c.click(); })")
     await asyncio.sleep(0.5)
@@ -160,11 +186,8 @@ async def search_and_extract_all(page: Page, buy_href: str) -> list[dict]:
         if not vehicles:
             break
 
-        # Filter out non-regular auctions and deduplicate
-        SKIP_AUCTIONS = ["TV AUCTION", "GOOD VALUE", "SAKIDORI", "SHARED INVENTORY"]
-        chunk = [v for v in vehicles
-                 if v["item_id"] and v["item_id"] not in all_ids
-                 and not any(skip in (v.get("auction_house") or "").upper() for skip in SKIP_AUCTIONS)]
+        # Deduplicate
+        chunk = [v for v in vehicles if v["item_id"] and v["item_id"] not in all_ids]
         for v in chunk:
             all_ids.add(v["item_id"])
 
