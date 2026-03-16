@@ -56,27 +56,8 @@ def upsert_auctions(vehicles: list[dict]) -> dict:
                             :source, NOW(), NOW()
                         )
                         ON CONFLICT (item_id) DO UPDATE SET
-                            lot_number = EXCLUDED.lot_number,
-                            maker = EXCLUDED.maker,
-                            model = EXCLUDED.model,
-                            grade = EXCLUDED.grade,
-                            chassis_code = EXCLUDED.chassis_code,
-                            engine_specs = EXCLUDED.engine_specs,
-                            year = EXCLUDED.year,
-                            mileage = EXCLUDED.mileage,
-                            color = EXCLUDED.color,
-                            rating = EXCLUDED.rating,
-                            start_price = EXCLUDED.start_price,
-                            auction_date = EXCLUDED.auction_date,
-                            auction_house = EXCLUDED.auction_house,
-                            location = EXCLUDED.location,
-                            status = EXCLUDED.status,
-                            image_url = EXCLUDED.image_url,
-                            images = EXCLUDED.images,
-                            exhibit_sheet = EXCLUDED.exhibit_sheet,
-                            inspection_expiry = EXCLUDED.inspection_expiry,
-                            source = EXCLUDED.source,
-                            last_updated = NOW()
+                            last_updated = NOW(),
+                            status = EXCLUDED.status
                         RETURNING (xmax = 0) AS is_new
                     """),
                     {
