@@ -28,15 +28,12 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
         print(f"  [taa] Failed to reach search page: {page.url}")
         return []
 
-    # Ensure only selected days are checked
-    await page.evaluate("""(days) => {
+    # Check ALL day checkboxes (Mon-Sat)
+    await page.evaluate("""() => {
         document.querySelectorAll('input[name="checkHallYobi"]').forEach(cb => {
-            const label = cb.parentElement?.textContent?.trim()?.toLowerCase() || '';
-            const shouldCheck = days.some(d => label.includes(d));
-            if (shouldCheck && !cb.checked) cb.click();
-            if (!shouldCheck && cb.checked) cb.click();
+            if (!cb.checked) cb.click();
         });
-    }""", DAYS)
+    }""")
     await asyncio.sleep(2)
 
     day_count = await page.evaluate("() => document.querySelectorAll('input[name=\"checkHallYobi\"]:checked').length")
