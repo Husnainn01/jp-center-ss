@@ -29,7 +29,7 @@ export default async function CustomerDashboard({ searchParams }: Props) {
   // Build query string for the backend
   const params = new URLSearchParams();
   params.set("page", String(page));
-  params.set("pageSize", "20");
+  params.set("pageSize", "40");
   params.set("includeMeta", "true");
   if (!sp.status) params.set("status", "upcoming");
 

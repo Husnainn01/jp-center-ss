@@ -28,7 +28,7 @@ export async function backendFetch<T = unknown>(
 
   const res = await fetch(`${BACKEND_URL}${path}`, {
     headers,
-    cache: "no-store",
+    next: { revalidate: 60 },
   });
 
   if (!res.ok) {

@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { AuctionSerialized } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
 import { proxyUrl } from "@/lib/image";
@@ -38,6 +39,12 @@ function Content({ auctions, page, totalPages, total, sourceCounts, filterOption
   const [models, setModels] = useState<FilterOption[]>([]);
 
   const get = useCallback((k: string) => sp.get(k) ?? "", [sp]);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function debouncedUpdate(updates: Record<string, string>) {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => update(updates), 400);
+  }
 
   // Fetch models when maker changes
   useEffect(() => {
@@ -147,7 +154,7 @@ function Content({ auctions, page, totalPages, total, sourceCounts, filterOption
                 <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Search</label>
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input placeholder="Maker, model, lot..." defaultValue={get("search")} onChange={e => update({ search: e.target.value })} className="pl-8 h-9" />
+                  <Input placeholder="Maker, model, lot..." defaultValue={get("search")} onChange={e => debouncedUpdate({ search: e.target.value })} className="pl-8 h-9" />
                 </div>
               </div>
 
@@ -204,11 +211,11 @@ function Content({ auctions, page, totalPages, total, sourceCounts, filterOption
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <div className="space-y-1">
                 <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Min Price (¥)</label>
-                <Input type="number" placeholder="0" defaultValue={get("minPrice")} onChange={e => update({ minPrice: e.target.value })} className="h-9" />
+                <Input type="number" placeholder="0" defaultValue={get("minPrice")} onChange={e => debouncedUpdate({ minPrice: e.target.value })} className="h-9" />
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Max Price (¥)</label>
-                <Input type="number" placeholder="No limit" defaultValue={get("maxPrice")} onChange={e => update({ maxPrice: e.target.value })} className="h-9" />
+                <Input type="number" placeholder="No limit" defaultValue={get("maxPrice")} onChange={e => debouncedUpdate({ maxPrice: e.target.value })} className="h-9" />
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Rating</label>
@@ -270,8 +277,7 @@ function Content({ auctions, page, totalPages, total, sourceCounts, filterOption
               <Card className="overflow-hidden hover:shadow-lg transition-all duration-200 h-full border-transparent hover:border-primary/20">
                 <div className="aspect-[4/3] bg-muted relative overflow-hidden">
                   {a.imageUrl ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img src={proxyUrl(a.imageUrl)} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
+                    <Image src={proxyUrl(a.imageUrl)} alt={`${a.maker} ${a.model}`} fill className="object-cover group-hover:scale-105 transition-transform duration-300" sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw" loading="lazy" unoptimized />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-muted-foreground/40">
                       <Car className="h-10 w-10" />
@@ -321,10 +327,9 @@ function Content({ auctions, page, totalPages, total, sourceCounts, filterOption
           <CardContent className="p-0 divide-y">
             {auctions.map(a => (
               <Link key={a.id} href={`/dashboard/${a.id}`} className="flex items-center gap-4 p-3 hover:bg-accent/50 transition-colors group">
-                <div className="w-20 h-14 rounded-md overflow-hidden bg-muted flex-shrink-0">
+                <div className="w-20 h-14 rounded-md overflow-hidden bg-muted flex-shrink-0 relative">
                   {a.imageUrl ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img src={proxyUrl(a.imageUrl)} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    <Image src={proxyUrl(a.imageUrl)} alt={`${a.maker} ${a.model}`} fill className="object-cover" sizes="80px" loading="lazy" unoptimized />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-muted-foreground/30"><Car className="h-5 w-5" /></div>
                   )}
@@ -352,7 +357,7 @@ function Content({ auctions, page, totalPages, total, sourceCounts, filterOption
       {totalPages > 1 && (
         <div className="flex items-center justify-between pt-2">
           <span className="text-sm text-muted-foreground">
-            Showing {(page - 1) * 20 + 1}-{Math.min(page * 20, total)} of {total.toLocaleString()}
+            Showing {(page - 1) * 40 + 1}-{Math.min(page * 40, total)} of {total.toLocaleString()}
           </span>
           <div className="flex items-center gap-1">
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => goPage(page - 1)}>
