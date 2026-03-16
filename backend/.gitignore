@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+
+# Environment
+.env
+.env.*
+
+# Prisma generated
+src/generated/
+
+# Misc
+.DS_Store
+*.tsbuildinfo
+npm-debug.log*

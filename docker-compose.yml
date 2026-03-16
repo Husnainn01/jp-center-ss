@@ -1,0 +1,62 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: jp-auction-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: jp_auction
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/jp_auction
+      FRONTEND_URL: http://localhost:3000
+      CRM_API_URL: https://ssh-crm-production.up.railway.app
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  scraper-aucnet:
+    build: ./scraper
+    command: python run_aucnet.py
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/jp_auction
+      AUCNET_INTERVAL_MINUTES: 30
+      HEADLESS: "true"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  scraper-ninja:
+    build: ./scraper
+    command: python run_ninja.py
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/jp_auction
+      NINJA_INTERVAL_MINUTES: 30
+      HEADLESS: "true"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  scraper-taa:
+    build: ./scraper
+    command: python run_taa.py
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/jp_auction
+      TAA_INTERVAL_MINUTES: 30
+      HEADLESS: "true"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+volumes:
+  pgdata:

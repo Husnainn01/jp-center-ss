@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Auction {
+  id              Int       @id @default(autoincrement())
+  itemId          String    @unique @map("item_id")
+  lotNumber       String    @map("lot_number")
+  maker           String
+  model           String
+  grade           String?
+  chassisCode     String?   @map("chassis_code")
+  engineSpecs     String?   @map("engine_specs")
+  year            String?
+  mileage         String?
+  color           String?
+  rating          String?
+  startPrice      Decimal?  @map("start_price") @db.Decimal(12, 2)
+  auctionDate     String    @map("auction_date")
+  auctionHouse    String    @map("auction_house")
+  location        String
+  status          String    @default("upcoming")
+  soldPrice       Decimal?  @map("sold_price") @db.Decimal(12, 2)
+  soldAt          DateTime? @map("sold_at")
+  imageUrl        String?   @map("image_url")
+  images          Json?     @default("[]")
+  exhibitSheet    String?   @map("exhibit_sheet")
+  inspectionExpiry String?  @map("inspection_expiry")
+  source          String    @default("aucnet")
+  firstSeen       DateTime  @default(now()) @map("first_seen")
+  lastUpdated     DateTime  @updatedAt @map("last_updated")
+
+  @@map("auctions")
+}
+
+model SyncLog {
+  id           Int      @id @default(autoincrement())
+  runAt        DateTime @default(now()) @map("run_at")
+  newCount     Int      @default(0) @map("new_count")
+  updatedCount Int      @default(0) @map("updated_count")
+  expiredCount Int      @default(0) @map("expired_count")
+  totalScraped Int      @default(0) @map("total_scraped")
+  source       String   @default("aucnet")
+  error        String?
+  durationMs   Int?     @map("duration_ms")
+
+  @@map("sync_logs")
+}
+
+model SessionState {
+  id              Int       @id @default(1)
+  cookiesPath     String?   @map("cookies_path")
+  lastLogin       DateTime? @map("last_login")
+  isValid         Boolean   @default(false) @map("is_valid")
+  auctionUserId   String?   @map("auction_user_id")
+  auctionPassword String?   @map("auction_password")
+
+  @@map("session_state")
+}
+
+model AuctionSite {
+  id          String    @id
+  name        String
+  url         String
+  userId      String?   @map("user_id")
+  password    String?
+  isEnabled   Boolean   @default(false) @map("is_enabled")
+  isConnected Boolean   @default(false) @map("is_connected")
+  lastLogin   DateTime? @map("last_login")
+  lastSync    DateTime? @map("last_sync")
+  cookiesPath String?   @map("cookies_path")
+
+  @@map("auction_sites")
+}
+
+model User {
+  id              Int       @id @default(autoincrement())
+  email           String    @unique
+  password        String
+  name            String
+  role            String    @default("customer")
+  isActive        Boolean   @default(true) @map("is_active")
+  crmUserId       String?   @unique @map("crm_user_id")
+  crmCustomerId   String?   @unique @map("crm_customer_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  lastLoginAt     DateTime? @map("last_login_at")
+  lists           CarList[]
+  bidRequests     BidRequest[]
+
+  @@map("users")
+}
+
+model CarList {
+  id        Int           @id @default(autoincrement())
+  name      String
+  userId    Int           @map("user_id")
+  user      User          @relation(fields: [userId], references: [id])
+  createdAt DateTime      @default(now()) @map("created_at")
+  items     CarListItem[]
+
+  @@map("car_lists")
+}
+
+model CarListItem {
+  id        Int      @id @default(autoincrement())
+  listId    Int      @map("list_id")
+  list      CarList  @relation(fields: [listId], references: [id], onDelete: Cascade)
+  auctionId Int      @map("auction_id")
+  note      String?
+  addedAt   DateTime @default(now()) @map("added_at")
+
+  @@unique([listId, auctionId])
+  @@map("car_list_items")
+}
+
+model BidRequest {
+  id             Int       @id @default(autoincrement())
+  userId         Int       @map("user_id")
+  user           User      @relation(fields: [userId], references: [id])
+  auctionId      Int       @map("auction_id")
+  maxBid         Decimal?  @map("max_bid") @db.Decimal(12, 2)
+  note           String?
+  status         String    @default("pending")
+  crmBidRefCode  String?   @map("crm_bid_ref_code")
+  sentToCrm      Boolean   @default(false) @map("sent_to_crm")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  reviewedAt     DateTime? @map("reviewed_at")
+
+  @@unique([userId, auctionId])
+  @@map("bid_requests")
+}

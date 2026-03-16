@@ -1,0 +1,8 @@
+__pycache__
+*.pyc
+.env
+*.html
+*.png
+*.json
+test_*.py
+.venv

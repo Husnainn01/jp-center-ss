@@ -1,0 +1,61 @@
+"""Entry point: runs ALL scrapers on a schedule (local dev convenience)."""
+
+import os
+import asyncio
+from dotenv import load_dotenv
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+load_dotenv()
+
+from sync import run_sync
+from ninja_sync import run_ninja_sync
+from taa_sync import run_taa_sync
+
+
+async def run_all():
+    """Run all 3 scrapers sequentially."""
+    print("[main] --- Running Aucnet ---")
+    try:
+        await run_sync()
+    except Exception as e:
+        print(f"[main] Aucnet failed: {e}")
+
+    print("[main] --- Running NINJA/USS ---")
+    try:
+        await run_ninja_sync()
+    except Exception as e:
+        print(f"[main] NINJA failed: {e}")
+
+    print("[main] --- Running TAA ---")
+    try:
+        await run_taa_sync()
+    except Exception as e:
+        print(f"[main] TAA failed: {e}")
+
+    print("[main] --- All scrapers done ---")
+
+
+async def main():
+    interval = int(os.getenv("POLL_INTERVAL_MINUTES", "30"))
+
+    print(f"[main] Starting ALL scrapers (interval: {interval}m)")
+    print("[main] Running initial sync...")
+    await run_all()
+
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(run_all, "interval", minutes=interval, id="sync_all")
+    scheduler.start()
+
+    print(f"[main] Scheduler running. Next sync in {interval} minutes.")
+    print("[main] Press Ctrl+C to stop.\n")
+
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except (KeyboardInterrupt, SystemExit):
+        print("\n[main] Shutting down...")
+        scheduler.shutdown()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

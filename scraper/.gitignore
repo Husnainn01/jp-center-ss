@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Environment
+.env
+.env.*
+
+# Session data
+session.json
+*.json
+!requirements.txt
+
+# Test snapshots
+*.html
+*.png
+
+# Misc
+.DS_Store
