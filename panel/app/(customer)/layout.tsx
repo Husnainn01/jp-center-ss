@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Car, Gavel, User, LogOut, List, Bell, ChevronDown } from "lucide-react";
+import { cache } from "react";
 
 const navItems = [
   { href: "/dashboard", label: "Upcoming Cars", icon: Car },
@@ -12,12 +13,14 @@ const navItems = [
   { href: "/profile", label: "Profile", icon: User },
 ];
 
+const getSession = cache(() => getServerSession(authOptions));
+
 export default async function CustomerLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const session = await getServerSession(authOptions);
+  const session = await getSession();
   if (!session) redirect("/login");
 
   if ((session.user as { role: string }).role === "admin") {

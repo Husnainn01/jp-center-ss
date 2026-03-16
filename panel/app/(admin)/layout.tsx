@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { LayoutDashboard, Car, Clock, RefreshCw, Settings, Gavel, Users, LogOut, Bell, ChevronDown, Shield } from "lucide-react";
+import { cache } from "react";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -15,12 +16,14 @@ const navItems = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
+const getSession = cache(() => getServerSession(authOptions));
+
 export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const session = await getServerSession(authOptions);
+  const session = await getSession();
   if (!session) redirect("/login");
   if ((session.user as { role: string }).role !== "admin") redirect("/dashboard");
 
