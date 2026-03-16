@@ -150,14 +150,9 @@ async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, 
     }""")
     await asyncio.sleep(0.5)
 
-    # Click specific model
+    # Click specific model — this selects it and triggers search
     cat_id = model["catId"]
     await page.evaluate(f"() => makerListChoiceCarCat('{cat_id}')")
-    await page.wait_for_load_state("networkidle", timeout=15000)
-    await asyncio.sleep(3)
-
-    # Click search for this model
-    await page.evaluate("() => makerListCheckSearch()")
     await page.wait_for_load_state("networkidle", timeout=30000)
     await asyncio.sleep(8)
 
