@@ -168,16 +168,21 @@ def mark_expired(active_item_ids: set[str], source: str | None = None) -> int:
         session.close()
 
 
-def get_credentials() -> tuple[str, str]:
-    """Get credentials from DB settings or .env."""
+def get_site_credentials(site_id: str) -> tuple[str, str]:
+    """Get credentials for an auction site from the auction_sites table."""
     session = Session()
     try:
         row = session.execute(
-            text("SELECT auction_user_id, auction_password FROM session_state WHERE id = 1")
+            text("SELECT user_id, password FROM auction_sites WHERE id = :site_id"),
+            {"site_id": site_id},
         ).fetchone()
         if row and row[0] and row[1]:
             return row[0], row[1]
     finally:
         session.close()
+    return "", ""
 
-    return os.getenv("AUCTION_USER_ID", ""), os.getenv("AUCTION_PASSWORD", "")
+
+def get_credentials() -> tuple[str, str]:
+    """Get Aucnet credentials from auction_sites table."""
+    return get_site_credentials("aucnet")

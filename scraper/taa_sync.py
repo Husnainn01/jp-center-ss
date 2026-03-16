@@ -6,32 +6,18 @@ import os
 from playwright.async_api import async_playwright
 from taa_login import taa_login
 from taa_scraper import taa_search_and_extract
-from db import mark_expired, log_sync
+from db import mark_expired, log_sync, get_site_credentials
 
-# TAA credentials: Number, User ID, Password
-# Read from DB auction_sites table or env
+
 def get_taa_credentials():
-    from db import Session
-    from sqlalchemy import text
-    session = Session()
-    try:
-        row = session.execute(
-            text("SELECT user_id, password FROM auction_sites WHERE id = 'taa'")
-        ).fetchone()
-        if row and row[0] and row[1]:
-            # TAA needs 3 fields: number is stored in user_id as "NUMBER:ID"
-            parts = row[0].split(":")
-            if len(parts) == 2:
-                return parts[0], parts[1], row[1]
-            return row[0], "", row[1]
-    finally:
-        session.close()
-
-    return (
-        os.getenv("TAA_NUMBER", "CN5005"),
-        os.getenv("TAA_USER_ID", "xxund7qt"),
-        os.getenv("TAA_PASSWORD", "L57Sxyqha4B4"),
-    )
+    """Get TAA credentials. TAA needs 3 fields: number is stored in user_id as 'NUMBER:ID'."""
+    user_id, password = get_site_credentials("taa")
+    if not user_id:
+        return "", "", ""
+    parts = user_id.split(":")
+    if len(parts) == 2:
+        return parts[0], parts[1], password
+    return user_id, "", password
 
 
 async def run_taa_sync():

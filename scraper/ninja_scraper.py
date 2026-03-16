@@ -8,8 +8,7 @@ import base64
 import re
 from playwright.async_api import Page, BrowserContext
 from db import upsert_auctions
-
-IMAGES_DIR = os.path.join(os.path.dirname(__file__), "..", "panel", "public", "ninja-images")
+from storage import upload_image
 
 MAKERS = [
     "TOYOTA", "LEXUS", "NISSAN", "HONDA", "MAZDA", "MITSUBISHI",
@@ -21,7 +20,6 @@ MAKERS = [
 async def ninja_search_and_extract(context: BrowserContext) -> list[str]:
     page = context.pages[0] if context.pages else await context.new_page()
     all_ids = []
-    os.makedirs(IMAGES_DIR, exist_ok=True)
 
     for maker in MAKERS:
         print(f"  [ninja] Scraping {maker}...")
@@ -274,11 +272,6 @@ def _parse_detail_text(text: str, maker: str, site: str, bid_no: str, times: str
 
 async def _download_image(page: Page, url: str) -> str | None:
     try:
-        filename = hashlib.md5(url.encode()).hexdigest() + ".jpg"
-        local_path = os.path.join(IMAGES_DIR, filename)
-        if os.path.exists(local_path) and os.path.getsize(local_path) > 500:
-            return f"/ninja-images/{filename}"
-
         result = await page.evaluate("""async (url) => {
             try {
                 const res = await fetch(url, { credentials: 'include' });
@@ -293,9 +286,9 @@ async def _download_image(page: Page, url: str) -> str | None:
             b64 = result.split(",", 1)[1]
             img_bytes = base64.b64decode(b64)
             if len(img_bytes) > 500:
-                with open(local_path, "wb") as f:
-                    f.write(img_bytes)
-                return f"/ninja-images/{filename}"
+                s3_url = upload_image(img_bytes, "ninja-images", url)
+                if s3_url:
+                    return s3_url
         return None
     except:
         return None

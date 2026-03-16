@@ -6,28 +6,14 @@ import os
 from playwright.async_api import async_playwright
 from ninja_login import ninja_login
 from ninja_scraper import ninja_search_and_extract
-from db import log_sync
-
-def get_ninja_credentials():
-    from db import Session
-    from sqlalchemy import text
-    session = Session()
-    try:
-        row = session.execute(
-            text("SELECT user_id, password FROM auction_sites WHERE id = 'uss'")
-        ).fetchone()
-        if row and row[0] and row[1]:
-            return row[0], row[1]
-    finally:
-        session.close()
-    return os.getenv("NINJA_USER_ID", "L4013V80"), os.getenv("NINJA_PASSWORD", "93493493")
+from db import log_sync, get_site_credentials
 
 
 async def run_ninja_sync():
     start = time.time()
     print("[ninja-sync] Starting USS/NINJA sync...")
 
-    user_id, password = get_ninja_credentials()
+    user_id, password = get_site_credentials("uss")
     if not user_id or not password:
         error = "USS credentials not configured"
         print(f"[ninja-sync] ERROR: {error}")

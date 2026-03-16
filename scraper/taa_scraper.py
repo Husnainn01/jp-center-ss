@@ -5,10 +5,10 @@ Images are downloaded locally since TAA requires auth cookies."""
 import asyncio
 import os
 import hashlib
+import base64
 from playwright.async_api import Page, BrowserContext
 from db import upsert_auctions
-
-IMAGES_DIR = os.path.join(os.path.dirname(__file__), "..", "panel", "public", "taa-images")
+from storage import upload_image
 
 # Days to scrape — checkHallYobi checkboxes
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat"]
@@ -210,16 +210,9 @@ async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx:
             return None
 
         # Download images through the authenticated browser session
-        os.makedirs(IMAGES_DIR, exist_ok=True)
-
         async def download_image(page: Page, url: str) -> str | None:
-            """Download image via browser fetch (uses session cookies). Returns local path."""
+            """Download image via browser fetch, upload to S3."""
             try:
-                filename = hashlib.md5(url.encode()).hexdigest() + ".jpg"
-                local_path = os.path.join(IMAGES_DIR, filename)
-                if os.path.exists(local_path) and os.path.getsize(local_path) > 500:
-                    return f"/taa-images/{filename}"
-
                 result = await page.evaluate("""async (url) => {
                     try {
                         const res = await fetch(url, { credentials: 'include' });
@@ -234,13 +227,12 @@ async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx:
                 }""", url)
 
                 if result and result.startswith("data:"):
-                    import base64
                     b64 = result.split(",", 1)[1]
                     img_bytes = base64.b64decode(b64)
                     if len(img_bytes) > 500:
-                        with open(local_path, "wb") as f:
-                            f.write(img_bytes)
-                        return f"/taa-images/{filename}"
+                        s3_url = upload_image(img_bytes, "taa-images", url)
+                        if s3_url:
+                            return s3_url
                 return None
             except:
                 return None
