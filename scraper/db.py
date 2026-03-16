@@ -169,6 +169,19 @@ def get_credentials() -> tuple[str, str]:
     return get_site_credentials("aucnet")
 
 
+def get_existing_item_ids(source: str) -> set[str]:
+    """Get all existing item_ids for a source. Used to skip already-scraped vehicles."""
+    session = Session()
+    try:
+        rows = session.execute(
+            text("SELECT item_id FROM auctions WHERE source = :source AND image_url IS NOT NULL"),
+            {"source": source},
+        ).fetchall()
+        return {row[0] for row in rows}
+    finally:
+        session.close()
+
+
 def is_site_enabled(site_id: str) -> bool:
     """Check if an auction site is enabled."""
     session = Session()
