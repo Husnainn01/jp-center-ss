@@ -6,4 +6,4 @@ RUN npm ci
 COPY . .
 RUN npx prisma generate && npm run build
 
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/index.js"]
