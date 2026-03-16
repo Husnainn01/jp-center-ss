@@ -61,6 +61,7 @@ def upload_image(img_bytes: bytes, prefix: str, source_url: str) -> str | None:
             Key=key,
             Body=img_bytes,
             ContentType="image/jpeg",
+            ACL="public-read",
         )
         return f"{S3_ENDPOINT}/{S3_BUCKET}/{key}"
     except Exception as e:
