@@ -11,9 +11,6 @@ from playwright.async_api import Page, BrowserContext
 from db import upsert_auctions, get_existing_item_ids
 from storage import upload_image
 
-# Concurrency limit for parallel detail extraction
-MAX_CONCURRENT_DETAILS = 3
-
 MAKERS = [
     "TOYOTA", "LEXUS", "NISSAN", "HONDA", "MAZDA", "MITSUBISHI",
     "SUBARU", "DAIHATSU", "SUZUKI", "MERCEDES BENZ", "BMW", "AUDI",
@@ -161,10 +158,9 @@ async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, 
 
 
 async def _paginate_results(page: Page, context: BrowserContext, maker: str, existing_ids: set) -> list[str]:
-    """Paginate through search results with parallel detail extraction."""
+    """Paginate through search results. Skip existing vehicles, parallel image uploads."""
     all_ids = []
     page_num = 0
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_DETAILS)
 
     while True:
         page_num += 1
@@ -198,39 +194,30 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
             item_id = f"uss-{vp['bidNo']}-{date_guess}"
             if item_id in existing_ids:
                 skipped += 1
-                all_ids.append(item_id)  # Still track as "seen" for expiry logic
+                all_ids.append(item_id)
             else:
                 new_params.append(vp)
 
         total_on_page = len(vehicle_params)
         print(f"  [ninja] {maker} p{page_num}: {total_on_page} vehicles ({skipped} existing, {len(new_params)} new)")
 
-        if new_params:
-            # Extract new vehicles in parallel using separate tabs
-            vehicles = []
+        # Extract new vehicles sequentially on the main page
+        vehicles = []
+        for vp in new_params:
+            try:
+                v = await _extract_vehicle_detail(page, context, vp, maker)
+                if v and v.get("item_id"):
+                    vehicles.append(v)
+            except Exception as e:
+                print(f"  [ninja] Detail failed: {e}")
+                continue
 
-            async def extract_one(vp):
-                async with semaphore:
-                    detail_page = await context.new_page()
-                    try:
-                        v = await _extract_vehicle_detail_tab(detail_page, context, vp, maker)
-                        if v and v.get("item_id"):
-                            return v
-                    except Exception as e:
-                        print(f"  [ninja] Detail failed: {e}")
-                    finally:
-                        await detail_page.close()
-                    return None
-
-            results = await asyncio.gather(*[extract_one(vp) for vp in new_params])
-            vehicles = [v for v in results if v]
-
-            if vehicles:
-                result = upsert_auctions(vehicles)
-                all_ids.extend(v["item_id"] for v in vehicles)
-                existing_ids.update(v["item_id"] for v in vehicles)  # Don't re-scrape if we see again
-                img_total = sum(len(v.get("images", [])) for v in vehicles)
-                print(f"  [ninja] {maker} p{page_num}: {len(vehicles)} → DB (new:{result['new']}, imgs:{img_total})")
+        if vehicles:
+            result = upsert_auctions(vehicles)
+            all_ids.extend(v["item_id"] for v in vehicles)
+            existing_ids.update(v["item_id"] for v in vehicles)
+            img_total = sum(len(v.get("images", [])) for v in vehicles)
+            print(f"  [ninja] {maker} p{page_num}: {len(vehicles)} → DB (new:{result['new']}, imgs:{img_total})")
 
         # Next page
         has_next = await page.evaluate("""() => {
@@ -246,23 +233,18 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
     return all_ids
 
 
-async def _extract_vehicle_detail_tab(detail_page: Page, context: BrowserContext, params: dict, maker: str) -> dict | None:
-    """Open vehicle detail in a NEW tab, extract data + images, return vehicle dict."""
+async def _extract_vehicle_detail(page: Page, context: BrowserContext, params: dict, maker: str) -> dict | None:
+    """Open vehicle detail on the main page, extract data + images, go back."""
     try:
         idx, site, times, bid_no = params["index"], params["site"], params["times"], params["bidNo"]
 
-        # Navigate to detail page directly via URL (avoids needing the list page)
-        await detail_page.evaluate(f"""async () => {{
-            // Use the same session — navigate to detail
-            window.location.href = '/ninja/searchresultdetail.action?index={idx}&siteCd={site}&times={times}&bidNo={bid_no}';
-        }}""")
-        await detail_page.wait_for_load_state("networkidle", timeout=15000)
+        await page.evaluate(f"() => seniCarDetail('{idx}', '{site}', '{times}', '{bid_no}', '')")
+        await page.wait_for_load_state("networkidle", timeout=15000)
         await asyncio.sleep(2)
 
-        text = await detail_page.inner_text("body")
+        text = await page.inner_text("body")
 
-        # Extract images
-        imgs_data = await detail_page.evaluate("""() => {
+        imgs_data = await page.evaluate("""() => {
             const car = [];
             const sheet = [];
             const seen = new Set();
@@ -282,7 +264,7 @@ async def _extract_vehicle_detail_tab(detail_page: Page, context: BrowserContext
 
         # Upload images in parallel
         async def upload_one(url):
-            return await _download_and_upload(detail_page, url, "ninja-images")
+            return await _download_and_upload(page, url, "ninja-images")
 
         car_tasks = [upload_one(url) for url in imgs_data.get("car", [])]
         car_results = await asyncio.gather(*car_tasks) if car_tasks else []
@@ -290,7 +272,7 @@ async def _extract_vehicle_detail_tab(detail_page: Page, context: BrowserContext
 
         exhibit_sheet = None
         for url in imgs_data.get("sheet", []):
-            path = await _download_and_upload(detail_page, url, "ninja-images")
+            path = await _download_and_upload(page, url, "ninja-images")
             if path:
                 exhibit_sheet = path
                 break
@@ -300,9 +282,26 @@ async def _extract_vehicle_detail_tab(detail_page: Page, context: BrowserContext
         vehicle["image_url"] = car_images[0] if car_images else None
         vehicle["exhibit_sheet"] = exhibit_sheet
 
+        # Go back to list
+        await page.evaluate("""() => {
+            const links = document.querySelectorAll('a');
+            for (const a of links) {
+                if (a.textContent.trim() === 'Back to the list') { a.click(); return; }
+            }
+            history.back();
+        }""")
+        await page.wait_for_load_state("networkidle", timeout=15000)
+        await asyncio.sleep(2)
+
         return vehicle
 
     except Exception as e:
+        try:
+            await page.go_back()
+            await page.wait_for_load_state("networkidle", timeout=10000)
+            await asyncio.sleep(2)
+        except:
+            pass
         return None
 
 
