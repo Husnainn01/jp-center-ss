@@ -160,10 +160,11 @@ async def search_and_extract_all(page: Page, buy_href: str) -> list[dict]:
         if not vehicles:
             break
 
-        # Filter out TV AUCTION and deduplicate
+        # Filter out non-regular auctions and deduplicate
+        SKIP_AUCTIONS = ["TV AUCTION", "GOOD VALUE", "SAKIDORI", "SHARED INVENTORY"]
         chunk = [v for v in vehicles
                  if v["item_id"] and v["item_id"] not in all_ids
-                 and "TV AUCTION" not in (v.get("auction_house") or "").upper()]
+                 and not any(skip in (v.get("auction_house") or "").upper() for skip in SKIP_AUCTIONS)]
         for v in chunk:
             all_ids.add(v["item_id"])
 
