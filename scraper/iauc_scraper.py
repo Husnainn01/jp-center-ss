@@ -440,12 +440,24 @@ async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None
     if not vehicle.get("maker"):
         return None
 
-    # Get images — single check with short wait
+    # Get images — check all img src attributes (not just naturalWidth)
     imgs = await page.evaluate("""() => {
-        return Array.from(document.querySelectorAll('img'))
+        const all = Array.from(document.querySelectorAll('img'));
+        const debug = all.map(i => i.src?.substring(0, 60) || '').filter(s => s && !s.includes('data:'));
+        if (debug.length < 20) console.log('All imgs:', debug);
+        return all
             .filter(i => i.src && i.src.includes('iauc_pic'))
             .map(i => ({ src: i.src, w: i.naturalWidth, h: i.naturalHeight }));
     }""")
+
+    if not imgs:
+        # Debug: log what images ARE on the page
+        all_srcs = await page.evaluate("""() => {
+            return Array.from(document.querySelectorAll('img'))
+                .map(i => i.src?.substring(0, 80) || '')
+                .filter(s => s && !s.includes('data:') && !s.includes('.gif'));
+        }""")
+        print(f"  [iauc] No iauc_pic images for {vehicle_id}. Found: {all_srcs[:5]}")
 
     car_urls = []
     sheet_url = None
