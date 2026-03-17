@@ -125,7 +125,8 @@ CREATE TABLE IF NOT EXISTS bid_requests (
 INSERT INTO auction_sites (id, name, url) VALUES
   ('aucnet', 'Aucnet', 'https://www.aucneostation.com/'),
   ('uss', 'USS/NINJA', 'https://www.ninja-cartrade.jp/'),
-  ('taa', 'TAA', 'https://taacaa.jp/')
+  ('taa', 'TAA', 'https://taacaa.jp/'),
+  ('iauc', 'iAUC', 'https://www.iauc.co.jp/')
 ON CONFLICT (id) DO NOTHING;
 `;
 

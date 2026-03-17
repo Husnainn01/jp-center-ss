@@ -68,5 +68,17 @@ services:
       - postgres
     restart: unless-stopped
 
+  scraper-iauc:
+    build: ./scraper
+    command: python run_iauc.py
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/jp_auction
+      IAUC_INTERVAL_MINUTES: 30
+      HEADLESS: "true"
+      <<: *s3-env
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
 volumes:
   pgdata:

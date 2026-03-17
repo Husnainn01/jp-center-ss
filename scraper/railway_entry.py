@@ -18,8 +18,11 @@ elif SCRAPER_TYPE == "ninja":
 elif SCRAPER_TYPE == "taa":
     print("[railway] Loading taa scraper...")
     from run_taa import main
+elif SCRAPER_TYPE == "iauc":
+    print("[railway] Loading iauc scraper...")
+    from run_iauc import main
 else:
-    print(f"ERROR: SCRAPER_TYPE must be 'aucnet', 'ninja', or 'taa'. Got: '{SCRAPER_TYPE}'")
+    print(f"ERROR: SCRAPER_TYPE must be 'aucnet', 'ninja', 'taa', or 'iauc'. Got: '{SCRAPER_TYPE}'")
     sys.exit(1)
 
 import asyncio

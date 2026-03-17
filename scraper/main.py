@@ -10,10 +10,11 @@ load_dotenv()
 from sync import run_sync
 from ninja_sync import run_ninja_sync
 from taa_sync import run_taa_sync
+from iauc_sync import run_iauc_sync
 
 
 async def run_all():
-    """Run all 3 scrapers sequentially."""
+    """Run all 4 scrapers sequentially."""
     print("[main] --- Running Aucnet ---")
     try:
         await run_sync()
@@ -31,6 +32,12 @@ async def run_all():
         await run_taa_sync()
     except Exception as e:
         print(f"[main] TAA failed: {e}")
+
+    print("[main] --- Running iAUC ---")
+    try:
+        await run_iauc_sync()
+    except Exception as e:
+        print(f"[main] iAUC failed: {e}")
 
     print("[main] --- All scrapers done ---")
 
