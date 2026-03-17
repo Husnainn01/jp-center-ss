@@ -318,11 +318,21 @@ async def _extract_results(page: Page, context: BrowserContext, maker: str, exis
     if total == 0:
         return []
 
-    # Get __tid
-    tid = ""
-    tid_match = re.search(r'__tid=([^&#]+)', page.url)
-    if tid_match:
-        tid = tid_match.group(1)
+    # Get __tid from page — check URL, links, or hidden inputs
+    tid = await page.evaluate("""() => {
+        // Try URL
+        const urlMatch = window.location.href.match(/__tid=([^&#]+)/);
+        if (urlMatch) return urlMatch[1];
+        // Try any link on the page
+        for (const a of document.querySelectorAll('a[href*="__tid"]')) {
+            const m = a.href.match(/__tid=([^&#]+)/);
+            if (m) return m[1];
+        }
+        // Try hidden input
+        const inp = document.querySelector('input[name="__tid"]');
+        if (inp) return inp.value;
+        return '';
+    }""")
 
     page_num = 0
     while True:
@@ -403,8 +413,22 @@ async def _extract_results(page: Page, context: BrowserContext, maker: str, exis
 
 async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None:
     """Navigate to detail, extract data + upload images."""
+    # If tid is empty, try to get it from current page
+    if not tid:
+        tid = await page.evaluate("""() => {
+            for (const a of document.querySelectorAll('a[href*="__tid"]')) {
+                const m = a.href.match(/__tid=([^&#]+)/);
+                if (m) return m[1];
+            }
+            return '';
+        }""")
+
     detail_url = f"https://www.iauc.co.jp/detail/?vehicleId={vehicle_id}&owner_id=&from=vehicle&id=&__tid={tid}"
-    await page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+    try:
+        await page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+    except:
+        # Retry without networkidle
+        await asyncio.sleep(5)
     await asyncio.sleep(3)
 
     detail_text = await page.inner_text("body")
