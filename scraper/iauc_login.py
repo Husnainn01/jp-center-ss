@@ -7,11 +7,19 @@ from playwright.async_api import Page
 LOGIN_URL = "https://www.iauc.co.jp/service/"
 
 
+async def _safe_wait(page: Page, timeout=15000):
+    """Wait for networkidle, ignore timeout (SPA may never idle)."""
+    try:
+        await page.wait_for_load_state("networkidle", timeout=timeout)
+    except:
+        pass
+
+
 async def iauc_login(page: Page, user_id: str, password: str) -> bool:
     """Login to iAUC. Handles force-login. Returns True on success."""
     try:
-        await page.goto(LOGIN_URL, wait_until="networkidle", timeout=30000)
-        await asyncio.sleep(2)
+        await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+        await asyncio.sleep(3)
 
         # Click LOGIN link
         await page.evaluate("""() => {
@@ -29,7 +37,7 @@ async def iauc_login(page: Page, user_id: str, password: str) -> bool:
                 if ((el.value || el.textContent || '').trim().includes('LOGIN')) el.click();
             });
         }""")
-        await page.wait_for_load_state("networkidle", timeout=30000)
+        await _safe_wait(page, 15000)
         await asyncio.sleep(3)
 
         # Handle force-login
@@ -37,12 +45,12 @@ async def iauc_login(page: Page, user_id: str, password: str) -> bool:
         if "はい Yes" in body:
             print("  [iauc] Force login — disconnecting existing sessions...")
             await page.click(".button-yes")
-            await page.wait_for_load_state("networkidle", timeout=30000)
+            await _safe_wait(page, 15000)
             await asyncio.sleep(5)
 
         # Switch to English
         await page.evaluate("() => { const el = document.querySelector('a.jp'); if (el) el.click(); }")
-        await page.wait_for_load_state("networkidle", timeout=15000)
+        await _safe_wait(page, 10000)
         await asyncio.sleep(3)
 
         return "vehicle" in page.url
