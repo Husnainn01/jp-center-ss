@@ -114,40 +114,37 @@ async def _scrape_day(page: Page, context: BrowserContext, day: dict, existing_i
     }""")
     await asyncio.sleep(5)
 
-    # Uncheck Kyoyuzaiko
+    # Uncheck Kyoyuzaiko and all auction sites
     await page.evaluate("""() => {
         document.querySelectorAll('input[name="e[]"]').forEach(cb => { if (cb.checked) cb.click(); });
-    }""")
-    await asyncio.sleep(1)
-
-    # Uncheck ALL auction sites first
-    await page.evaluate("""() => {
         document.querySelectorAll('input[name="d[]"]').forEach(cb => { if (cb.checked) cb.click(); });
     }""")
     await asyncio.sleep(1)
 
-    # Click the day button to toggle/show that day's auctions
-    await page.mouse.click(day['x'], day['y'])
-    await asyncio.sleep(2)
+    # Select All Auction & Tender sites
+    await page.click("a.title-button.checkbox_on_all")
+    await asyncio.sleep(1)
 
-    # Now check only the Listed/Preparing sites under this day
-    # After clicking the day button, the visible d[] checkboxes belong to this day
-    checked = await page.evaluate("""() => {
-        let count = 0;
-        document.querySelectorAll('input[name="d[]"]').forEach(cb => {
-            const parent = cb.closest('li') || cb.parentElement;
-            const text = parent?.textContent?.trim() || '';
-            if ((text.includes('Listed') || text.includes('Preparing') || text.includes('入札可') || text.includes('仮出品')) && !cb.checked) {
-                cb.click();
-                count++;
-            }
+    # Get all day buttons
+    all_days = await page.evaluate("""() => {
+        return Array.from(document.querySelectorAll('button.day-button')).map(btn => {
+            const r = btn.getBoundingClientRect();
+            return { text: btn.textContent.trim(), x: r.x + r.width/2, y: r.y + r.height/2 };
         });
-        return count;
     }""")
-    print(f"  [iauc] {day['label']}: selected {checked} auction sites")
+
+    # Uncheck every day EXCEPT the target day
+    for d in all_days:
+        if d['text'] != day['label']:
+            await page.mouse.click(d['x'], d['y'])
+            await asyncio.sleep(0.5)
+    await asyncio.sleep(1)
+
+    checked = await page.evaluate('() => document.querySelectorAll(\'input[name="d[]"]:checked\').length')
+    print(f"  [iauc] {day['label']}: {checked} auction sites selected (Auction + Tender)")
 
     if checked == 0:
-        print(f"  [iauc] {day['label']}: no active auctions, skipping")
+        print(f"  [iauc] {day['label']}: no auctions, skipping")
         return []
 
     # Click Next to Make & Model page
