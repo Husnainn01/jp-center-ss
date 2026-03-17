@@ -427,19 +427,40 @@ async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None
     try:
         await page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
     except:
-        # Retry without networkidle
         await asyncio.sleep(5)
-    await asyncio.sleep(3)
+    await asyncio.sleep(5)
+
+    # Check if we actually loaded the detail page
+    current_url = page.url
+    if "detail" not in current_url:
+        print(f"  [iauc] Detail page didn't load for {vehicle_id} (URL: {current_url[:60]})")
+        return None
 
     detail_text = await page.inner_text("body")
     vehicle = _parse_detail(detail_text, vehicle_id)
 
-    # Get images
+    if not vehicle.get("maker"):
+        print(f"  [iauc] No data parsed for {vehicle_id} (tid={'set' if tid else 'EMPTY'})")
+        return None
+
+    # Wait for images to load
+    await asyncio.sleep(3)
+
+    # Get images — check both loaded and lazy images
     imgs = await page.evaluate("""() => {
-        return Array.from(document.querySelectorAll('img'))
-            .filter(i => i.src.includes('iauc_pic') && i.naturalWidth > 100)
-            .map(i => ({ src: i.src, w: i.naturalWidth, h: i.naturalHeight }));
+        const all = Array.from(document.querySelectorAll('img'));
+        const iauc = all.filter(i => i.src && i.src.includes('iauc_pic'));
+        return iauc.map(i => ({ src: i.src, w: i.naturalWidth, h: i.naturalHeight }));
     }""")
+
+    if not imgs:
+        # Try waiting more for lazy-loaded images
+        await asyncio.sleep(5)
+        imgs = await page.evaluate("""() => {
+            return Array.from(document.querySelectorAll('img'))
+                .filter(i => i.src && i.src.includes('iauc_pic'))
+                .map(i => ({ src: i.src, w: i.naturalWidth, h: i.naturalHeight }));
+        }""")
 
     car_urls = []
     sheet_url = None
