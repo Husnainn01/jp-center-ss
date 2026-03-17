@@ -1,4 +1,5 @@
-"""iAUC scraper: maker-by-maker, models in batches of 20.
+"""iAUC scraper: day-by-day, maker-by-maker, models in batches of 20.
+Scrapes one upcoming day at a time (WED→THU→FRI→SAT→MON).
 Extracts vehicle details + all images + auction sheet.
 Optimized: skip existing vehicles, parallel image uploads."""
 
@@ -25,44 +26,132 @@ IMPORTED_MAKERS = [
 
 
 async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[str]:
-    """Full iAUC scrape. Returns list of scraped item_ids."""
+    """Full iAUC scrape — day by day, starting from next upcoming day."""
 
     existing_ids = get_existing_item_ids("iauc")
     print(f"  [iauc] {len(existing_ids)} existing vehicles in DB (will skip)")
 
+    # Get upcoming days from the page
+    upcoming_days = await _get_upcoming_days(page)
+    if not upcoming_days:
+        print("  [iauc] No upcoming days found!")
+        return []
+
+    print(f"  [iauc] Upcoming days: {[d['label'] for d in upcoming_days]}")
+
+    all_ids = []
+
+    for day in upcoming_days:
+        print(f"\n  [iauc] ===== {day['label']} =====")
+        try:
+            ids = await _scrape_day(page, context, day, existing_ids)
+            all_ids.extend(ids)
+            print(f"  [iauc] {day['label']} complete: {len(ids)} vehicles")
+        except Exception as e:
+            print(f"  [iauc] {day['label']} failed: {e}")
+            # Try to go back to auction selection for next day
+            try:
+                await page.evaluate("""() => {
+                    document.querySelectorAll('a').forEach(a => {
+                        if (a.textContent.trim() === 'Select Auctions') a.click();
+                    });
+                }""")
+                await asyncio.sleep(5)
+            except:
+                pass
+
+    print(f"\n  [iauc] Total across all days: {len(all_ids)} vehicles")
+    return all_ids
+
+
+async def _get_upcoming_days(page: Page) -> list[dict]:
+    """Get list of upcoming day buttons (skip Today/finished)."""
+    days = await page.evaluate("""() => {
+        const results = [];
+        document.querySelectorAll('button.day-button').forEach(btn => {
+            const text = btn.textContent.trim();
+            const cls = btn.className || '';
+            const rect = btn.getBoundingClientRect();
+
+            // Count checkboxes in this day's section
+            // Day sections have d[] checkboxes grouped together
+            let hasListed = false;
+            let sectionEl = btn.parentElement;
+            if (sectionEl) {
+                sectionEl.querySelectorAll('input[name="d[]"]').forEach(cb => {
+                    const li = cb.closest('li') || cb.parentElement;
+                    const liText = li?.textContent?.trim() || '';
+                    if (liText.includes('Listed') || liText.includes('Preparing')) {
+                        hasListed = true;
+                    }
+                });
+            }
+
+            results.push({
+                label: text,
+                isToday: text === 'Today' || cls.includes('active'),
+                hasListed,
+                x: rect.x + rect.width / 2,
+                y: rect.y + rect.height / 2,
+            });
+        });
+        return results;
+    }""")
+
+    # Filter: skip Today, only keep days that have listed auctions
+    upcoming = [d for d in days if not d['isToday']]
+    return upcoming
+
+
+async def _scrape_day(page: Page, context: BrowserContext, day: dict, existing_ids: set) -> list[str]:
+    """Scrape all vehicles for one day."""
+
+    # Go to auction selection page
+    await page.evaluate("""() => {
+        document.querySelectorAll('a').forEach(a => {
+            if (a.textContent.trim() === 'Select Auctions') a.click();
+        });
+    }""")
+    await asyncio.sleep(5)
+
     # Uncheck Kyoyuzaiko
-    print("  [iauc] Setting up auction selection...")
     await page.evaluate("""() => {
         document.querySelectorAll('input[name="e[]"]').forEach(cb => { if (cb.checked) cb.click(); });
     }""")
     await asyncio.sleep(1)
 
-    # Uncheck Today's finished auctions, keep upcoming days only
-    # The d[] checkboxes that show "Finished" or are in Today's section should be unchecked
+    # Uncheck ALL auction sites first
     await page.evaluate("""() => {
-        document.querySelectorAll('input[name="d[]"]').forEach(cb => {
-            const parent = cb.closest('li') || cb.parentElement;
-            const text = parent?.textContent?.trim() || '';
-            // Uncheck if finished
-            if (text.includes('Finished') || text.includes('セリ終了')) {
-                if (cb.checked) cb.click();
-            }
-            // Make sure upcoming ones are checked
-            if (text.includes('Listed') || text.includes('入札可') || text.includes('Preparing') || text.includes('仮出品')) {
-                if (!cb.checked) cb.click();
-            }
-        });
+        document.querySelectorAll('input[name="d[]"]').forEach(cb => { if (cb.checked) cb.click(); });
     }""")
     await asyncio.sleep(1)
 
-    d_checked = await page.evaluate('() => document.querySelectorAll(\'input[name="d[]"]:checked\').length')
-    d_total = await page.evaluate('() => document.querySelectorAll(\'input[name="d[]"]\').length')
-    print(f"  [iauc] Auction sites selected: {d_checked}/{d_total} (skipped finished)")
-    await asyncio.sleep(1)
+    # Click the day button to toggle/show that day's auctions
+    await page.mouse.click(day['x'], day['y'])
+    await asyncio.sleep(2)
+
+    # Now check only the Listed/Preparing sites under this day
+    # After clicking the day button, the visible d[] checkboxes belong to this day
+    checked = await page.evaluate("""() => {
+        let count = 0;
+        document.querySelectorAll('input[name="d[]"]').forEach(cb => {
+            const parent = cb.closest('li') || cb.parentElement;
+            const text = parent?.textContent?.trim() || '';
+            if ((text.includes('Listed') || text.includes('Preparing') || text.includes('入札可') || text.includes('仮出品')) && !cb.checked) {
+                cb.click();
+                count++;
+            }
+        });
+        return count;
+    }""")
+    print(f"  [iauc] {day['label']}: selected {checked} auction sites")
+
+    if checked == 0:
+        print(f"  [iauc] {day['label']}: no active auctions, skipping")
+        return []
 
     # Click Next to Make & Model page
     await page.evaluate('() => check_sites(document.querySelector(".page-next-button"))')
-    # SPA navigation — wait for URL to change instead of networkidle
     for _ in range(20):
         await asyncio.sleep(2)
         if "#maker" in page.url or "search" in page.url:
@@ -70,30 +159,29 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     await asyncio.sleep(3)
 
     if "#maker" not in page.url and "search" not in page.url:
-        print(f"  [iauc] Failed to reach Make & Model page: {page.url}")
+        print(f"  [iauc] Failed to reach Make & Model page")
         return []
 
+    # Scrape all makers for this day
     all_ids = []
     all_makers = JP_MAKERS + IMPORTED_MAKERS
 
     for maker in all_makers:
-        print(f"  [iauc] Scraping {maker}...")
         try:
             ids = await _scrape_maker(page, context, maker, existing_ids)
             all_ids.extend(ids)
             if ids:
-                print(f"  [iauc] {maker}: {len(ids)} vehicles")
+                print(f"  [iauc] {day['label']} > {maker}: {len(ids)} vehicles")
         except Exception as e:
-            print(f"  [iauc] {maker} failed: {e}")
+            print(f"  [iauc] {day['label']} > {maker} failed: {e}")
 
-    print(f"  [iauc] Total: {len(all_ids)} vehicles")
     return all_ids
 
 
 async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existing_ids: set) -> list[str]:
     """Scrape all vehicles for one maker, models in batches of 20."""
 
-    # Navigate back to Make & Model page
+    # Navigate to Make & Model tab
     await page.evaluate("""() => {
         document.querySelectorAll('a').forEach(a => {
             if (a.textContent.trim() === 'Select Make & Model') a.click();
@@ -101,16 +189,15 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
     }""")
     await asyncio.sleep(3)
 
-    # Clear previous maker selection
+    # Clear previous selection
     await page.evaluate("""() => {
-        // Click Clear All buttons for both Japanese and Imported
         document.querySelectorAll('button').forEach(b => {
             if (b.textContent.trim() === 'Clear All' && b.offsetParent !== null) b.click();
         });
     }""")
     await asyncio.sleep(2)
 
-    # Find and click the maker
+    # Click the maker
     maker_box = await page.evaluate(f"""() => {{
         for (const li of document.querySelectorAll('li.search-maker-checkbox')) {{
             if (li.textContent.trim() === '{maker}') {{
@@ -122,13 +209,12 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
     }}""")
 
     if not maker_box:
-        print(f"  [iauc] {maker} not found on page")
         return []
 
     await page.mouse.click(maker_box['x'], maker_box['y'])
     await asyncio.sleep(3)
 
-    # Get all models for this maker
+    # Get models
     models = await page.evaluate("""() => {
         const items = [];
         document.querySelectorAll('input[name="type[]"]').forEach(inp => {
@@ -147,23 +233,17 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
     if total_cars == 0:
         return []
 
-    print(f"  [iauc] {maker}: {len(models)} models, {total_cars} vehicles")
-
-    # Process models in batches of 20
+    # Process visible models in batches of 20
     all_ids = []
     visible_models = [m for m in models if m['visible']]
 
     for batch_start in range(0, len(visible_models), BATCH_SIZE):
         batch = visible_models[batch_start:batch_start + BATCH_SIZE]
-        batch_names = [m['name'] for m in batch]
         batch_total = sum(m['cnt'] for m in batch)
-
         if batch_total == 0:
             continue
 
-        print(f"  [iauc] {maker} batch {batch_start//BATCH_SIZE + 1}: {len(batch)} models ({batch_total} vehicles)")
-
-        # Clear previous model selection and select this batch
+        # Clear previous model selection
         await page.evaluate("""() => {
             document.querySelectorAll('input[name="type[]"]').forEach(inp => {
                 if (inp.checked) {
@@ -174,33 +254,30 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
         }""")
         await asyncio.sleep(1)
 
-        # Click each model in this batch
+        # Select models in this batch
         for m in batch:
             if m['y'] > 0:
                 await page.mouse.click(m['x'], m['y'])
                 await asyncio.sleep(0.2)
-
         await asyncio.sleep(1)
 
-        # Check if Next is enabled
+        # Enable and click Next
         next_disabled = await page.evaluate('() => document.querySelector("#next-bottom")?.disabled')
         if next_disabled:
-            # Force enable
             await page.evaluate('() => { var b = document.querySelector("#next-bottom"); if (b) b.disabled = false; }')
 
-        # Click Next to search
         await page.evaluate('() => document.querySelector("#next-bottom")?.click()')
         try:
             await page.wait_for_load_state("networkidle", timeout=15000)
         except:
-            pass  # SPA may not reach networkidle
+            pass
         await asyncio.sleep(8)
 
-        # Extract vehicles from results
+        # Extract vehicles
         ids = await _extract_results(page, context, maker, existing_ids)
         all_ids.extend(ids)
 
-        # Go back to Make & Model page for next batch
+        # Go back to Make & Model for next batch
         await page.evaluate("""() => {
             document.querySelectorAll('a').forEach(a => {
                 if (a.textContent.trim() === 'Select Make & Model') a.click();
@@ -208,7 +285,7 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
         }""")
         await asyncio.sleep(3)
 
-        # Re-select the maker for next batch
+        # Re-select maker
         maker_box2 = await page.evaluate(f"""() => {{
             for (const li of document.querySelectorAll('li.search-maker-checkbox')) {{
                 if (li.textContent.trim() === '{maker}') {{
@@ -226,10 +303,10 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
 
 
 async def _extract_results(page: Page, context: BrowserContext, maker: str, existing_ids: set) -> list[str]:
-    """Extract vehicles from the results page. Handles pagination."""
+    """Extract vehicles from results page with pagination."""
     all_ids = []
 
-    # Wait for car images to load
+    # Wait for images to load
     for _ in range(10):
         img_count = await page.evaluate("() => document.querySelectorAll('img[data-code]').length")
         if img_count > 0:
@@ -244,7 +321,7 @@ async def _extract_results(page: Page, context: BrowserContext, maker: str, exis
     if total == 0:
         return []
 
-    # Get __tid for building detail URLs
+    # Get __tid
     tid = ""
     tid_match = re.search(r'__tid=([^&#]+)', page.url)
     if tid_match:
@@ -254,7 +331,6 @@ async def _extract_results(page: Page, context: BrowserContext, maker: str, exis
     while True:
         page_num += 1
 
-        # Get vehicle IDs from image data-code attributes
         vehicle_ids = await page.evaluate("""() => {
             const items = [];
             const seen = new Set();
@@ -271,13 +347,11 @@ async def _extract_results(page: Page, context: BrowserContext, maker: str, exis
         if not vehicle_ids:
             break
 
-        # Filter out existing
         new_ids = [vid for vid in vehicle_ids if f"iauc-{vid}" not in existing_ids]
         skipped = len(vehicle_ids) - len(new_ids)
-
         print(f"  [iauc] {maker} p{page_num}: {len(vehicle_ids)} vehicles ({skipped} existing, {len(new_ids)} new)")
 
-        # Extract each new vehicle
+        # Extract new vehicles
         vehicles = []
         for vid in new_ids:
             try:
@@ -294,7 +368,7 @@ async def _extract_results(page: Page, context: BrowserContext, maker: str, exis
             img_total = sum(len(v.get("images", [])) for v in vehicles)
             print(f"  [iauc] {maker} p{page_num}: {len(vehicles)} → DB (new:{result['new']}, imgs:{img_total})")
 
-        # Also track skipped IDs
+        # Track all as seen
         for vid in vehicle_ids:
             item_id = f"iauc-{vid}"
             if item_id not in all_ids:
@@ -321,7 +395,6 @@ async def _extract_results(page: Page, context: BrowserContext, maker: str, exis
             pass
         await asyncio.sleep(5)
 
-        # Wait for new images
         for _ in range(10):
             cnt = await page.evaluate("() => document.querySelectorAll('img[data-code]').length")
             if cnt > 0:
@@ -332,12 +405,11 @@ async def _extract_results(page: Page, context: BrowserContext, maker: str, exis
 
 
 async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None:
-    """Navigate to detail page, extract data + upload images."""
+    """Navigate to detail, extract data + upload images."""
     detail_url = f"https://www.iauc.co.jp/detail/?vehicleId={vehicle_id}&owner_id=&from=vehicle&id=&__tid={tid}"
-    await page.goto(detail_url, wait_until="networkidle", timeout=30000)
+    await page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
     await asyncio.sleep(3)
 
-    # Parse data
     detail_text = await page.inner_text("body")
     vehicle = _parse_detail(detail_text, vehicle_id)
 
@@ -348,7 +420,6 @@ async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None
             .map(i => ({ src: i.src, w: i.naturalWidth, h: i.naturalHeight }));
     }""")
 
-    # Upload images in parallel
     car_urls = []
     sheet_url = None
     for img in imgs:
@@ -360,14 +431,13 @@ async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None
             else:
                 car_urls.append(img['src'])
 
-    # Parallel upload car images
+    # Parallel upload
     async def upload_one(url):
         return await _download_and_upload(page, url)
 
     car_results = await asyncio.gather(*[upload_one(u) for u in car_urls]) if car_urls else []
     car_images = [r for r in car_results if r]
 
-    # Upload auction sheet
     exhibit_sheet = None
     if sheet_url:
         exhibit_sheet = await _download_and_upload(page, sheet_url)
@@ -376,7 +446,7 @@ async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None
     vehicle["image_url"] = car_images[0] if car_images else None
     vehicle["exhibit_sheet"] = exhibit_sheet
 
-    # Go back to results
+    # Go back
     await page.go_back()
     try:
         await page.wait_for_load_state("networkidle", timeout=15000)
@@ -397,7 +467,6 @@ def _parse_detail(text: str, vehicle_id: str) -> dict:
             if len(parts) == 2:
                 fields[parts[0].strip()] = parts[1].strip()
 
-    # Get maker/model
     maker = ""
     model = ""
     known_makers = [
