@@ -30,11 +30,34 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     existing_ids = get_existing_item_ids("iauc")
     print(f"  [iauc] {len(existing_ids)} existing vehicles in DB (will skip)")
 
-    # Uncheck Kyoyuzaiko, keep Auction
+    # Uncheck Kyoyuzaiko
     print("  [iauc] Setting up auction selection...")
     await page.evaluate("""() => {
         document.querySelectorAll('input[name="e[]"]').forEach(cb => { if (cb.checked) cb.click(); });
     }""")
+    await asyncio.sleep(1)
+
+    # Uncheck Today's finished auctions, keep upcoming days only
+    # The d[] checkboxes that show "Finished" or are in Today's section should be unchecked
+    await page.evaluate("""() => {
+        document.querySelectorAll('input[name="d[]"]').forEach(cb => {
+            const parent = cb.closest('li') || cb.parentElement;
+            const text = parent?.textContent?.trim() || '';
+            // Uncheck if finished
+            if (text.includes('Finished') || text.includes('セリ終了')) {
+                if (cb.checked) cb.click();
+            }
+            // Make sure upcoming ones are checked
+            if (text.includes('Listed') || text.includes('入札可') || text.includes('Preparing') || text.includes('仮出品')) {
+                if (!cb.checked) cb.click();
+            }
+        });
+    }""")
+    await asyncio.sleep(1)
+
+    d_checked = await page.evaluate('() => document.querySelectorAll(\'input[name="d[]"]:checked\').length')
+    d_total = await page.evaluate('() => document.querySelectorAll(\'input[name="d[]"]\').length')
+    print(f"  [iauc] Auction sites selected: {d_checked}/{d_total} (skipped finished)")
     await asyncio.sleep(1)
 
     # Click Next to Make & Model page
