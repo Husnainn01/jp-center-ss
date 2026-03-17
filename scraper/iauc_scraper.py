@@ -203,13 +203,29 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
 
         # TODO: handle pagination within this batch (Next page button)
 
-        # Go back to Make & Model for next batch
-        await page.evaluate("""() => {
-            document.querySelectorAll('a').forEach(a => {
-                if (a.textContent.trim() === 'Select Make & Model') a.click();
-            });
-        }""")
-        await asyncio.sleep(5)
+        # Reload Make & Model page fresh (going back loses state)
+        search_url = page.url.split("#")[0] + "#maker" if "search" in page.url else ""
+        if not search_url:
+            # Find the search URL from any link
+            search_url = await page.evaluate("""() => {
+                for (const a of document.querySelectorAll('a[href*="vehicle/search"]')) {
+                    return a.href.split('#')[0] + '#maker';
+                }
+                return '';
+            }""")
+        if search_url:
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+            await asyncio.sleep(5)
+            # Re-select all makers
+            await page.evaluate("""() => {
+                const allBtns = Array.from(document.querySelectorAll('button'))
+                    .filter(b => b.textContent.trim() === 'All' && b.offsetParent !== null);
+                allBtns.forEach(b => b.click());
+            }""")
+            await asyncio.sleep(3)
+        else:
+            print("  [iauc] Could not find search URL, stopping batches")
+            break
 
     print(f"  [iauc] Total: {len(all_ids)} vehicles")
     return all_ids
