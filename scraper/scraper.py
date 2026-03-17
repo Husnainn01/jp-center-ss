@@ -37,52 +37,69 @@ EXTRACT_JS = """() => {
         const statusText = col9.find(t => t.includes('セリ') || t.includes('落札') || t.includes('流れ')) || '';
         const status = statusText.includes('落札') ? 'sold' : 'upcoming';
 
-        // === ALL IMAGES — generate full set from URL pattern ===
-        // Two URL patterns exist:
-        //   tvaa:  /tvaa/3/{folder}/{vehicleId}{nn}.jpg  (nn = 01-30)
-        //   stock: /stock/3/{year}/{vehicleId}_{nn}.jpg  (nn = 01-25)
-        // The list view only shows 3 images, but we can generate all from the base.
-
+        // === HIGH-RES IMAGES ===
+        // Collect all actual images from the listing (not blind generation)
+        // Upgrade to highest quality: /tvaa/1/ → /tvaa/3/, /stock/1/ → /stock/3/
         let carImages = [];
+        const seen = new Set();
+
+        // Get all car images shown in the listing
+        li.querySelectorAll('img').forEach(img => {
+            if (img.src && img.src.includes('aucnetcars.com') && !seen.has(img.src)) {
+                seen.add(img.src);
+                // Upgrade to high-res quality level 3
+                const hiRes = img.src
+                    .replace('/tvaa/1/', '/tvaa/3/')
+                    .replace('/tvaa/2/', '/tvaa/3/')
+                    .replace('/stock/1/', '/stock/3/')
+                    .replace('/stock/2/', '/stock/3/');
+                carImages.push(hiRes);
+            }
+        });
+
+        // Also try to generate additional images from URL pattern (for images not shown in list)
         const mainImg = li.querySelector('.prod_img img');
-        if (mainImg && mainImg.src && mainImg.src.includes('aucnetcars.com')) {
+        if (mainImg && mainImg.src && mainImg.src.includes('aucnetcars.com') && carImages.length < 10) {
             const src = mainImg.src.replace('/tvaa/1/', '/tvaa/3/').replace('/stock/1/', '/stock/3/');
 
             if (src.includes('/tvaa/')) {
-                // Pattern: .../{vehicleId}03.jpg → base is vehicleId (without last 2 digits)
                 const match = src.match(/^(.*\\/)(\\d+?)(\\d{2})\\.jpg$/);
                 if (match) {
                     const base = match[1] + match[2];
-                    for (let i = 1; i <= 30; i++) {
-                        carImages.push(base + String(i).padStart(2, '0') + '.jpg');
+                    // Generate up to 10 images (not 30 — many don't exist)
+                    for (let i = 1; i <= 10; i++) {
+                        const url = base + String(i).padStart(2, '0') + '.jpg';
+                        if (!seen.has(url)) {
+                            seen.add(url);
+                            carImages.push(url);
+                        }
                     }
                 }
             } else if (src.includes('/stock/')) {
-                // Pattern: .../{vehicleId}_03.jpg → base is vehicleId
                 const match = src.match(/^(.*\\/)([^_]+)_\\d{2}\\.jpg$/);
                 if (match) {
                     const base = match[1] + match[2];
-                    for (let i = 1; i <= 25; i++) {
-                        carImages.push(base + '_' + String(i).padStart(2, '0') + '.jpg');
+                    for (let i = 1; i <= 10; i++) {
+                        const url = base + '_' + String(i).padStart(2, '0') + '.jpg';
+                        if (!seen.has(url)) {
+                            seen.add(url);
+                            carImages.push(url);
+                        }
                     }
                 }
             }
-
-            // Fallback: if pattern didn't match, just collect what we have
-            if (carImages.length === 0) {
-                const seen = new Set();
-                li.querySelectorAll('img').forEach(img => {
-                    if (img.src && img.src.includes('aucnetcars.com') && !seen.has(img.src)) {
-                        seen.add(img.src);
-                        carImages.push(img.src.replace('/tvaa/1/', '/tvaa/3/').replace('/stock/1/', '/stock/3/'));
-                    }
-                });
-            }
         }
 
-        // Exhibit sheet
+        // Exhibit sheet — get highest quality
         const sheet = li.querySelector('.exhibit_sheet_img');
-        const exhibitSheet = sheet ? sheet.getAttribute('data-expand-img') : null;
+        let exhibitSheet = sheet ? sheet.getAttribute('data-expand-img') : null;
+        if (exhibitSheet) {
+            exhibitSheet = exhibitSheet
+                .replace('/tvaa/1/', '/tvaa/3/')
+                .replace('/tvaa/2/', '/tvaa/3/')
+                .replace('/stock/1/', '/stock/3/')
+                .replace('/stock/2/', '/stock/3/');
+        }
 
         return {
             item_id: li.getAttribute('data-item_id'),
