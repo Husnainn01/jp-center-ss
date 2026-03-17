@@ -62,8 +62,12 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
 
     # Click Next to Make & Model page
     await page.evaluate('() => check_sites(document.querySelector(".page-next-button"))')
-    await page.wait_for_load_state("networkidle", timeout=30000)
-    await asyncio.sleep(5)
+    # SPA navigation — wait for URL to change instead of networkidle
+    for _ in range(20):
+        await asyncio.sleep(2)
+        if "#maker" in page.url or "search" in page.url:
+            break
+    await asyncio.sleep(3)
 
     if "#maker" not in page.url and "search" not in page.url:
         print(f"  [iauc] Failed to reach Make & Model page: {page.url}")
@@ -186,7 +190,10 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
 
         # Click Next to search
         await page.evaluate('() => document.querySelector("#next-bottom")?.click()')
-        await page.wait_for_load_state("networkidle", timeout=60000)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except:
+            pass  # SPA may not reach networkidle
         await asyncio.sleep(8)
 
         # Extract vehicles from results
@@ -308,7 +315,10 @@ async def _extract_results(page: Page, context: BrowserContext, maker: str, exis
         if not has_next:
             break
 
-        await page.wait_for_load_state("networkidle", timeout=30000)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except:
+            pass
         await asyncio.sleep(5)
 
         # Wait for new images
@@ -368,7 +378,10 @@ async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None
 
     # Go back to results
     await page.go_back()
-    await page.wait_for_load_state("networkidle", timeout=30000)
+    try:
+        await page.wait_for_load_state("networkidle", timeout=15000)
+    except:
+        pass
     await asyncio.sleep(3)
 
     return vehicle
