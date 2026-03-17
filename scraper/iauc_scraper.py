@@ -165,12 +165,17 @@ async def _scrape_day(page: Page, context: BrowserContext, day: dict, existing_i
 
     for maker in all_makers:
         try:
+            print(f"  [iauc] Scraping {maker}...")
             ids = await _scrape_maker(page, context, maker, existing_ids)
             all_ids.extend(ids)
             if ids:
                 print(f"  [iauc] {day['label']} > {maker}: {len(ids)} vehicles")
+            else:
+                print(f"  [iauc] {day['label']} > {maker}: 0 vehicles")
         except Exception as e:
-            print(f"  [iauc] {day['label']} > {maker} failed: {e}")
+            print(f"  [iauc] {day['label']} > {maker} FAILED: {e}")
+            import traceback
+            traceback.print_exc()
 
     return all_ids
 
