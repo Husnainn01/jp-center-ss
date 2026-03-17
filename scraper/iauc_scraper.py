@@ -526,7 +526,15 @@ def _parse_detail(text: str, vehicle_id: str) -> dict:
     if year_match:
         year = year_match.group(1)
 
-    start_price = start_price_raw.replace(",", "") if start_price_raw else None
+    # iAUC prices are in yen. db.py multiplies by 10000 (designed for 万円).
+    # So divide by 10000 here to cancel out the db.py multiply.
+    start_price = None
+    if start_price_raw:
+        try:
+            price_yen = int(start_price_raw.replace(",", ""))
+            start_price = str(price_yen / 10000)
+        except ValueError:
+            pass
 
     rating = score
     if exterior or interior:
