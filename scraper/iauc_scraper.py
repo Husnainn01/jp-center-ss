@@ -62,19 +62,15 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
 
     # === Step 3: Select ALL Japanese + Imported makers ===
     print("  [iauc] Selecting all makers...")
-    # Click Japanese "All"
-    jp_all = page.locator('button:text-is("All")').nth(0)
-    im_all = page.locator('button:text-is("All")').nth(1)
+    # Click the two visible "All" buttons (Japanese + Imported)
+    await page.evaluate("""() => {
+        const allBtns = Array.from(document.querySelectorAll('button'))
+            .filter(b => b.textContent.trim() === 'All' && b.offsetParent !== null);
+        allBtns.forEach(b => b.click());
+    }""")
+    await asyncio.sleep(2)
 
-    for btn in [jp_all, im_all]:
-        try:
-            if await btn.is_visible():
-                await btn.click()
-                await asyncio.sleep(1)
-        except:
-            pass
-
-    # Fallback: click each maker via mouse if All buttons didn't work
+    # Fallback: click each maker via mouse
     makers_checked = await page.evaluate('() => document.querySelectorAll(\'input[name="maker[]"]:checked\').length')
     if makers_checked == 0:
         print("  [iauc] All buttons didn't work, clicking makers manually...")
