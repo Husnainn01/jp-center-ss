@@ -462,13 +462,21 @@ async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None
     car_urls = []
     sheet_url = None
     for img in imgs:
-        letter_match = re.search(r'/([A-F])\d+\.JPG', img['src'])
+        src = img['src']
+        # Pattern 1: /A09008.JPG (letter prefix)
+        letter_match = re.search(r'/([A-F])\d+\.JPG', src)
         if letter_match:
             letter = letter_match.group(1)
             if letter == 'A':
-                sheet_url = img['src']
+                sheet_url = src
             else:
-                car_urls.append(img['src'])
+                car_urls.append(src)
+            continue
+        # Pattern 2: img54219_scan.jpg (auction sheet) / img54219_1.jpg (car photos)
+        if '_scan.' in src:
+            sheet_url = src
+        elif re.search(r'_\d+\.jpg', src):
+            car_urls.append(src)
 
     # Parallel upload
     async def upload_one(url):
