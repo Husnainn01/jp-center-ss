@@ -358,7 +358,7 @@ async def _extract_results(page: Page, context: BrowserContext, maker: str, exis
         skipped = len(vehicle_ids) - len(new_ids)
         print(f"  [iauc] {maker} p{page_num}: {len(vehicle_ids)} vehicles ({skipped} existing, {len(new_ids)} new)")
 
-        # Extract new vehicles
+        # Extract each vehicle via detail page
         vehicles = []
         for vid in new_ids:
             try:
@@ -425,42 +425,27 @@ async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None
 
     detail_url = f"https://www.iauc.co.jp/detail/?vehicleId={vehicle_id}&owner_id=&from=vehicle&id=&__tid={tid}"
     try:
-        await page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+        await page.goto(detail_url, wait_until="domcontentloaded", timeout=20000)
     except:
-        await asyncio.sleep(5)
-    await asyncio.sleep(5)
+        pass
+    await asyncio.sleep(2)
 
-    # Check if we actually loaded the detail page
-    current_url = page.url
-    if "detail" not in current_url:
-        print(f"  [iauc] Detail page didn't load for {vehicle_id} (URL: {current_url[:60]})")
+    # Verify detail page loaded
+    if "detail" not in page.url:
         return None
 
     detail_text = await page.inner_text("body")
     vehicle = _parse_detail(detail_text, vehicle_id)
 
     if not vehicle.get("maker"):
-        print(f"  [iauc] No data parsed for {vehicle_id} (tid={'set' if tid else 'EMPTY'})")
         return None
 
-    # Wait for images to load
-    await asyncio.sleep(3)
-
-    # Get images — check both loaded and lazy images
+    # Get images — single check with short wait
     imgs = await page.evaluate("""() => {
-        const all = Array.from(document.querySelectorAll('img'));
-        const iauc = all.filter(i => i.src && i.src.includes('iauc_pic'));
-        return iauc.map(i => ({ src: i.src, w: i.naturalWidth, h: i.naturalHeight }));
+        return Array.from(document.querySelectorAll('img'))
+            .filter(i => i.src && i.src.includes('iauc_pic'))
+            .map(i => ({ src: i.src, w: i.naturalWidth, h: i.naturalHeight }));
     }""")
-
-    if not imgs:
-        # Try waiting more for lazy-loaded images
-        await asyncio.sleep(5)
-        imgs = await page.evaluate("""() => {
-            return Array.from(document.querySelectorAll('img'))
-                .filter(i => i.src && i.src.includes('iauc_pic'))
-                .map(i => ({ src: i.src, w: i.naturalWidth, h: i.naturalHeight }));
-        }""")
 
     car_urls = []
     sheet_url = None
@@ -488,13 +473,9 @@ async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None
     vehicle["image_url"] = car_images[0] if car_images else None
     vehicle["exhibit_sheet"] = exhibit_sheet
 
-    # Go back
+    # Go back to results
     await page.go_back()
-    try:
-        await page.wait_for_load_state("networkidle", timeout=15000)
-    except:
-        pass
-    await asyncio.sleep(3)
+    await asyncio.sleep(2)
 
     return vehicle
 
