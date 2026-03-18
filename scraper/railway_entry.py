@@ -7,7 +7,7 @@ print(f"[railway] Starting scraper entry point...")
 print(f"[railway] SCRAPER_TYPE = '{os.getenv('SCRAPER_TYPE', '')}'")
 print(f"[railway] DATABASE_URL = {'set' if os.getenv('DATABASE_URL') else 'NOT SET'}")
 
-SCRAPER_TYPE = os.getenv("SCRAPER_TYPE", "").lower()
+SCRAPER_TYPE = os.getenv("SCRAPER_TYPE", "").strip().lower()
 
 if SCRAPER_TYPE == "aucnet":
     print("[railway] Loading aucnet scraper...")
