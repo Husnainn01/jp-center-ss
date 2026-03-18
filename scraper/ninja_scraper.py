@@ -14,6 +14,13 @@ ALL_MAKERS = [
     "MERCEDES BENZ", "BMW", "AUDI", "VOLKSWAGEN", "PORSCHE",
 ]
 
+BRAND_CODES = {
+    "LEXUS": "00", "TOYOTA": "01", "NISSAN": "04", "HONDA": "06",
+    "MAZDA": "10", "MITSUBISHI": "08", "SUBARU": "14", "DAIHATSU": "15",
+    "SUZUKI": "16", "ISUZU": "17", "MERCEDES BENZ": "40", "BMW": "44",
+    "AUDI": "46", "VOLKSWAGEN": "47", "PORSCHE": "49",
+}
+
 # Max pages per maker to avoid getting stuck on one maker (e.g. TOYOTA with 20K vehicles)
 MAX_PAGES_PER_MAKER = 20
 
@@ -27,7 +34,7 @@ async def ninja_search_and_extract(context: BrowserContext, makers: list[str] | 
     # Capture the search URL for fresh navigation
     search_url = page.url
     if "searchcondition" not in search_url:
-        search_url = "https://www.ninja-cartrade.jp/ninja/buy/searchcondition"
+        search_url = "https://www.ninja-cartrade.jp/ninja/buy/searchcondition.action"
     print(f"  [ninja] Search URL: {search_url[:60]}...")
     print(f"  [ninja] Makers to scrape: {', '.join(makers)}")
 
@@ -63,13 +70,15 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
         pass
     await asyncio.sleep(3)
 
-    # Click maker
-    await page.evaluate(f"""() => {{
-        for (const a of document.querySelectorAll('a'))
-            if (a.textContent.trim() === '・{maker}') {{ a.click(); return; }}
-    }}""")
-    await page.wait_for_load_state("networkidle", timeout=15000)
-    await asyncio.sleep(2)
+    # Select maker via brand code
+    brand_code = BRAND_CODES.get(maker)
+    if not brand_code:
+        print(f"  [ninja] {maker}: no brand code, skipping")
+        return []
+
+    await page.evaluate(f"() => makerListChoiceBrand('{brand_code}')")
+    await page.wait_for_load_state("networkidle", timeout=30000)
+    await asyncio.sleep(3)
 
     # Get models
     models = await page.evaluate("""() => {
@@ -92,6 +101,8 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
     print(f"  [ninja] {maker}: {len(models)} models, {total_available} vehicles")
 
     if total_available == 0:
+        snippet = (await page.inner_text("body"))[:200]
+        print(f"  [ninja] {maker}: 0 vehicles, page snippet: {snippet}")
         return []
 
     # Select all body types
@@ -151,13 +162,14 @@ async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, 
         pass
     await asyncio.sleep(2)
 
-    # Click maker
-    await page.evaluate(f"""() => {{
-        for (const a of document.querySelectorAll('a'))
-            if (a.textContent.trim() === '・{maker}') {{ a.click(); return; }}
-    }}""")
-    await page.wait_for_load_state("networkidle", timeout=15000)
-    await asyncio.sleep(2)
+    # Select maker via brand code
+    brand_code = BRAND_CODES.get(maker)
+    if not brand_code:
+        return []
+
+    await page.evaluate(f"() => makerListChoiceBrand('{brand_code}')")
+    await page.wait_for_load_state("networkidle", timeout=30000)
+    await asyncio.sleep(3)
 
     # Select all body types
     await page.evaluate("""() => {
