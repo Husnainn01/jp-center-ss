@@ -103,104 +103,134 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
         </div>
       </div>
 
-      {/* Compact filters — all dropdowns in one row */}
-      <div className="flex flex-wrap gap-2 items-end">
-        {/* Search */}
-        <div className="relative w-44">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <input
-            ref={searchRef}
-            type="text"
-            placeholder="Search..."
-            defaultValue={get("search")}
-            onChange={e => debouncedUpdate({ search: e.target.value })}
-            className="h-8 w-full rounded-md border border-input bg-background pl-7 pr-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring/30"
-          />
-        </div>
+      {/* Filters */}
+      <Card>
+        <CardContent className="p-3">
+          {/* Row 1: Search + main filters */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+            <div className="col-span-2 relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                ref={searchRef}
+                type="text"
+                placeholder="Search maker, model, lot..."
+                defaultValue={get("search")}
+                onChange={e => debouncedUpdate({ search: e.target.value })}
+                className="h-8 w-full rounded-md border border-input bg-background pl-8 pr-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring/30"
+              />
+            </div>
 
-        {/* Maker */}
-        <select value={get("maker")} onChange={e => update({ maker: e.target.value })} className={`${sel} w-32`}>
-          <option value="">All Makers</option>
-          {filterOptions.makers.map(m => (
-            <option key={m.value} value={m.value}>{m.value} ({m.count})</option>
-          ))}
-        </select>
+            <div>
+              <select value={get("maker")} onChange={e => update({ maker: e.target.value })} className={sel}>
+                <option value="">All Makers</option>
+                {filterOptions.makers.map(m => (
+                  <option key={m.value} value={m.value}>{m.value} ({m.count})</option>
+                ))}
+              </select>
+            </div>
 
-        {/* Model */}
-        {models.length > 0 ? (
-          <select value={get("model")} onChange={e => update({ model: e.target.value })} className={`${sel} w-32`}>
-            <option value="">All Models</option>
-            {models.map(m => (
-              <option key={m.value} value={m.value}>{m.value} ({m.count})</option>
-            ))}
-          </select>
-        ) : get("maker") ? (
-          <select disabled className={`${sel} w-32 opacity-50`}><option>Loading...</option></select>
-        ) : null}
+            <div>
+              {models.length > 0 ? (
+                <select value={get("model")} onChange={e => update({ model: e.target.value })} className={sel}>
+                  <option value="">All Models</option>
+                  {models.map(m => (
+                    <option key={m.value} value={m.value}>{m.value} ({m.count})</option>
+                  ))}
+                </select>
+              ) : (
+                <select disabled={!get("maker")} className={`${sel} ${!get("maker") ? "opacity-50" : ""}`}>
+                  <option>{get("maker") ? "Loading..." : "Select Maker"}</option>
+                </select>
+              )}
+            </div>
 
-        {/* Auction House */}
-        <select value={get("auctionHouse")} onChange={e => update({ auctionHouse: e.target.value })} className={`${sel} w-36`}>
-          <option value="">All Auctions</option>
-          {filterOptions.auctionHouses.map(h => (
-            <option key={h.value} value={h.value}>{h.value} ({h.count})</option>
-          ))}
-        </select>
+            <div>
+              <select value={get("auctionHouse")} onChange={e => update({ auctionHouse: e.target.value })} className={sel}>
+                <option value="">All Auctions</option>
+                {filterOptions.auctionHouses.map(h => (
+                  <option key={h.value} value={h.value}>{h.value} ({h.count})</option>
+                ))}
+              </select>
+            </div>
 
-        {/* Location */}
-        <select value={get("location")} onChange={e => update({ location: e.target.value })} className={`${sel} w-32`}>
-          <option value="">All Locations</option>
-          {filterOptions.locations.map(l => (
-            <option key={l.value} value={l.value}>{l.value} ({l.count})</option>
-          ))}
-        </select>
+            <div>
+              <select value={get("location")} onChange={e => update({ location: e.target.value })} className={sel}>
+                <option value="">All Locations</option>
+                {filterOptions.locations.map(l => (
+                  <option key={l.value} value={l.value}>{l.value} ({l.count})</option>
+                ))}
+              </select>
+            </div>
+          </div>
 
-        {/* Rating */}
-        <select value={get("rating")} onChange={e => update({ rating: e.target.value })} className={`${sel} w-24`}>
-          <option value="">Rating</option>
-          <option value="S">S</option>
-          <option value="6">6+</option>
-          <option value="5">5+</option>
-          <option value="4.5">4.5+</option>
-          <option value="4">4+</option>
-          <option value="3.5">3.5+</option>
-        </select>
+          {/* Row 2: Price, Rating, Sort */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 mt-2">
+            <div>
+              <select value={get("minPrice")} onChange={e => update({ minPrice: e.target.value })} className={sel}>
+                <option value="">Min Price</option>
+                <option value="10000">¥10,000+</option>
+                <option value="50000">¥50,000+</option>
+                <option value="100000">¥100,000+</option>
+                <option value="300000">¥300,000+</option>
+                <option value="500000">¥500,000+</option>
+                <option value="1000000">¥1M+</option>
+              </select>
+            </div>
 
-        {/* Price Range */}
-        <select value={get("minPrice")} onChange={e => update({ minPrice: e.target.value })} className={`${sel} w-28`}>
-          <option value="">Min Price</option>
-          <option value="10000">¥10,000+</option>
-          <option value="50000">¥50,000+</option>
-          <option value="100000">¥100,000+</option>
-          <option value="300000">¥300,000+</option>
-          <option value="500000">¥500,000+</option>
-          <option value="1000000">¥1,000,000+</option>
-        </select>
+            <div>
+              <select value={get("maxPrice")} onChange={e => update({ maxPrice: e.target.value })} className={sel}>
+                <option value="">Max Price</option>
+                <option value="50000">~¥50,000</option>
+                <option value="100000">~¥100,000</option>
+                <option value="300000">~¥300,000</option>
+                <option value="500000">~¥500,000</option>
+                <option value="1000000">~¥1M</option>
+                <option value="3000000">~¥3M</option>
+              </select>
+            </div>
 
-        <select value={get("maxPrice")} onChange={e => update({ maxPrice: e.target.value })} className={`${sel} w-28`}>
-          <option value="">Max Price</option>
-          <option value="50000">~¥50,000</option>
-          <option value="100000">~¥100,000</option>
-          <option value="300000">~¥300,000</option>
-          <option value="500000">~¥500,000</option>
-          <option value="1000000">~¥1,000,000</option>
-          <option value="3000000">~¥3,000,000</option>
-        </select>
+            <div>
+              <select value={get("rating")} onChange={e => update({ rating: e.target.value })} className={sel}>
+                <option value="">Rating</option>
+                <option value="S">S</option>
+                <option value="6">6+</option>
+                <option value="5">5+</option>
+                <option value="4.5">4.5+</option>
+                <option value="4">4+</option>
+                <option value="3.5">3.5+</option>
+              </select>
+            </div>
 
-        {/* Sort */}
-        <select value={get("sort") || "firstSeen"} onChange={e => update({ sort: e.target.value })} className={`${sel} w-28`}>
-          <option value="firstSeen">Newest</option>
-          <option value="auctionDate">Date</option>
-          <option value="startPrice">Price</option>
-          <option value="maker">Maker</option>
-        </select>
+            <div>
+              <select value={get("sort") || "firstSeen"} onChange={e => update({ sort: e.target.value })} className={sel}>
+                <option value="firstSeen">Sort: Newest</option>
+                <option value="auctionDate">Sort: Date</option>
+                <option value="startPrice">Sort: Price</option>
+                <option value="maker">Sort: Maker</option>
+              </select>
+            </div>
 
-        {/* Clear */}
-        {activeFilters > 0 && (
-          <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={clearAll}>
-            <X className="h-3 w-3 mr-1" /> Clear
-          </Button>
-        )}
-      </div>
+            <div>
+              <select value={get("order") || "desc"} onChange={e => update({ order: e.target.value })} className={sel}>
+                <option value="desc">Descending</option>
+                <option value="asc">Ascending</option>
+              </select>
+            </div>
+
+            <div>
+              {activeFilters > 0 ? (
+                <Button variant="outline" size="sm" className="h-8 w-full text-xs" onClick={clearAll}>
+                  <X className="h-3 w-3 mr-1" /> Clear ({activeFilters})
+                </Button>
+              ) : (
+                <div className="h-8 flex items-center text-xs text-muted-foreground px-2">
+                  {total.toLocaleString()} results
+                </div>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Results */}
       {auctions.length === 0 ? (
