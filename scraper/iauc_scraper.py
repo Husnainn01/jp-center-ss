@@ -60,6 +60,10 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
         print(f"  [iauc] Failed to reach Make & Model page")
         return []
 
+    # Save the search URL for re-navigation between batches
+    search_base_url = page.url.split("#")[0]
+    print(f"  [iauc] Search URL saved: {search_base_url[:60]}...")
+
     # === Step 3: Select ALL Japanese + Imported makers ===
     print("  [iauc] Selecting all makers...")
     # Click the two visible "All" buttons (Japanese + Imported)
