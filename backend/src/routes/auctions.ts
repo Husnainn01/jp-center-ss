@@ -14,6 +14,7 @@ auctionsRouter.get("/", async (req, res) => {
     const model = req.query.model as string | undefined;
     const location = req.query.location as string | undefined;
     const auctionHouse = req.query.auctionHouse as string | undefined;
+    const chassisCode = req.query.chassisCode as string | undefined;
     const source = req.query.source as string | undefined;
     const status = req.query.status as string | undefined;
     const search = req.query.search as string | undefined;
@@ -31,6 +32,7 @@ auctionsRouter.get("/", async (req, res) => {
     if (maker) where.maker = { contains: maker };
     if (model) where.model = { contains: model };
     if (location) where.location = { contains: location };
+    if (chassisCode) where.chassisCode = { contains: chassisCode };
     if (auctionHouse) where.auctionHouse = { contains: auctionHouse };
     if (source) where.source = source;
     if (status) where.status = status;
@@ -79,7 +81,7 @@ auctionsRouter.get("/", async (req, res) => {
         prisma.$queryRaw`SELECT maker, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY maker ORDER BY cnt DESC LIMIT 30`,
         prisma.$queryRaw`SELECT location, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY location ORDER BY cnt DESC LIMIT 20`,
         prisma.$queryRaw`SELECT auction_house, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY auction_house ORDER BY cnt DESC`,
-        prisma.$queryRaw`SELECT auction_date_norm::text as date, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' AND auction_date_norm IS NOT NULL AND auction_date_norm >= CURRENT_DATE GROUP BY auction_date_norm ORDER BY auction_date_norm ASC`,
+        prisma.$queryRaw`SELECT auction_date_norm::text as date, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' AND auction_date_norm IS NOT NULL AND auction_date_norm >= (NOW() AT TIME ZONE 'Asia/Tokyo')::date GROUP BY auction_date_norm ORDER BY auction_date_norm ASC`,
       );
     }
 

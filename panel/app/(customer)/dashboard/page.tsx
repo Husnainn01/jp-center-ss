@@ -33,7 +33,7 @@ export default async function CustomerDashboard({ searchParams }: Props) {
   params.set("includeMeta", "true");
   if (!sp.status) params.set("status", "upcoming");
 
-  const passthrough = ["maker", "model", "location", "auctionHouse", "source", "search", "sort", "order", "minPrice", "maxPrice", "rating", "yearFrom", "yearTo", "auctionDay"];
+  const passthrough = ["maker", "model", "chassisCode", "location", "auctionHouse", "source", "search", "sort", "order", "minPrice", "maxPrice", "rating", "yearFrom", "yearTo", "auctionDay"];
   for (const key of passthrough) {
     if (sp[key]) params.set(key, sp[key]!);
   }

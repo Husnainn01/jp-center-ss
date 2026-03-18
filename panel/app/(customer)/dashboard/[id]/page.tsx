@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { backendFetch } from "@/lib/api";
 import { AuctionSerialized } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Calendar, MapPin, Hash, Gauge, Palette, Star, Fuel, Shield, Clock } from "lucide-react";
+import { Calendar, MapPin, Hash, Gauge, Palette, Star, Fuel, Shield, Clock } from "lucide-react";
+import { BackButton } from "./BackButton";
 import { ImageCarousel } from "../../../(admin)/components/ImageCarousel";
 import { AddToListButton } from "../../components/AddToListButton";
 import { SendForBiddingButton } from "../../components/SendForBiddingButton";
@@ -40,13 +40,7 @@ export default async function CustomerVehicleDetail({ params }: Props) {
       {/* ──── Navigation + Title Bar ──── */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <Link
-            href="/dashboard"
-            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-3"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Back to listings
-          </Link>
+          <BackButton />
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold tracking-tight">
               {auction.maker} {auction.model}

@@ -32,8 +32,9 @@ const sel = "h-9 rounded-md border border-input bg-card px-3 text-xs w-full focu
 
 function formatDayLabel(dateStr: string): { label: string; day: string; weekday: string } {
   const d = new Date(dateStr + "T00:00:00");
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Use JST for "Today"/"Tomorrow" since auctions are in Japan
+  const jstNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+  const today = new Date(jstNow.getFullYear(), jstNow.getMonth(), jstNow.getDate());
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
@@ -52,17 +53,58 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
   const sp = useSearchParams();
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [models, setModels] = useState<FilterOption[]>([]);
+  const [chassisCodes, setChassisCodes] = useState<FilterOption[]>([]);
 
   const get = useCallback((k: string) => sp.get(k) ?? "", [sp]);
 
+  // Restore saved filters on first load if no URL params
+  useEffect(() => {
+    if (sp.toString() === "" || sp.toString() === "page=1") {
+      try {
+        const saved = localStorage.getItem("auction-filters");
+        if (saved) {
+          const params = new URLSearchParams(saved);
+          params.delete("page");
+          // Clear stale auctionDay (past dates)
+          const savedDay = params.get("auctionDay");
+          if (savedDay) {
+            const jstNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+            const todayStr = `${jstNow.getFullYear()}-${String(jstNow.getMonth() + 1).padStart(2, "0")}-${String(jstNow.getDate()).padStart(2, "0")}`;
+            if (savedDay < todayStr) params.delete("auctionDay");
+          }
+          if (params.toString()) {
+            router.replace(`/dashboard?${params.toString()}`);
+          }
+        }
+      } catch {}
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save filters to localStorage whenever they change
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(sp.toString());
+      params.delete("page");
+      if (params.toString()) {
+        localStorage.setItem("auction-filters", params.toString());
+      }
+    } catch {}
+  }, [sp]);
+
   useEffect(() => {
     const maker = get("maker");
+    const model = get("model");
     if (maker) {
-      fetch(`/api/filter-options?maker=${encodeURIComponent(maker)}`)
+      const params = new URLSearchParams({ maker });
+      if (model) params.set("model", model);
+      fetch(`/api/filter-options?${params}`)
         .then(r => r.json())
-        .then(d => setModels(d.models || []))
-        .catch(() => setModels([]));
-    } else { setModels([]); }
+        .then(d => {
+          setModels(d.models || []);
+          setChassisCodes(d.chassisCodes || []);
+        })
+        .catch(() => { setModels([]); setChassisCodes([]); });
+    } else { setModels([]); setChassisCodes([]); }
   }, [get]);
 
   function update(updates: Record<string, string>) {
@@ -70,19 +112,23 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
     Object.entries(updates).forEach(([k, v]) => {
       if (v) params.set(k, v); else params.delete(k);
     });
-    if ("maker" in updates && updates.maker !== get("maker")) params.delete("model");
+    if ("maker" in updates && updates.maker !== get("maker")) { params.delete("model"); params.delete("chassisCode"); }
+    if ("model" in updates && updates.model !== get("model")) params.delete("chassisCode");
     params.delete("page");
     router.push(`/dashboard?${params.toString()}`);
   }
 
-  function clearAll() { router.push("/dashboard"); }
+  function clearAll() {
+    try { localStorage.removeItem("auction-filters"); } catch {}
+    router.push("/dashboard");
+  }
   function goPage(p: number) {
     const params = new URLSearchParams(sp.toString());
     params.set("page", String(p));
     router.push(`/dashboard?${params.toString()}`);
   }
 
-  const filterKeys = ["auctionDay", "maker", "model", "location", "auctionHouse", "minPrice", "maxPrice", "rating", "yearFrom", "yearTo"];
+  const filterKeys = ["auctionDay", "maker", "model", "chassisCode", "location", "auctionHouse", "minPrice", "maxPrice", "rating", "yearFrom", "yearTo"];
   const activeFilters = filterKeys.filter(k => get(k)).length;
   const auctionDays = filterOptions.auctionDays || [];
 
@@ -151,8 +197,8 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
 
       {/* Filters */}
       <div className="bg-card border rounded-lg p-4 space-y-3">
-        {/* Row 1: Make, Model, Year range */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* Row 1: Make, Model, Chassis Code, Year range */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <select value={get("maker")} onChange={e => update({ maker: e.target.value })} className={sel}>
             <option value="">All Makes</option>
             {filterOptions.makers.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
@@ -161,6 +207,11 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
           <select value={get("model")} onChange={e => update({ model: e.target.value })} className={sel} disabled={models.length === 0 && !get("maker")}>
             <option value="">{get("maker") ? (models.length ? "All Models" : "Loading...") : "Select Make first"}</option>
             {models.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
+          </select>
+
+          <select value={get("chassisCode")} onChange={e => update({ chassisCode: e.target.value })} className={sel} disabled={chassisCodes.length === 0 && !get("model")}>
+            <option value="">{get("model") ? (chassisCodes.length ? "All Chassis" : "No chassis data") : "Select Model first"}</option>
+            {chassisCodes.map(c => <option key={c.value} value={c.value}>{c.value} ({c.count})</option>)}
           </select>
 
           <select value={get("yearFrom")} onChange={e => update({ yearFrom: e.target.value })} className={sel}>

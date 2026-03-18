@@ -9,13 +9,31 @@ filterOptionsRouter.get("/", async (req, res) => {
     const maker = req.query.maker as string | undefined;
     const includeAll = req.query.includeAll === "true";
 
+    const model = req.query.model as string | undefined;
+
     if (maker) {
       const models = await prisma.$queryRaw<{ model: string; cnt: number }[]>`
         SELECT model, COUNT(*)::int as cnt FROM auctions
         WHERE status = 'upcoming' AND maker = ${maker} AND model != ''
         GROUP BY model ORDER BY cnt DESC LIMIT 50
       `;
-      res.json({ models: models.map(m => ({ value: m.model, count: m.cnt })) });
+
+      // If model is also provided, return chassis codes for that maker+model
+      let chassisCodes: { value: string; count: number }[] = [];
+      if (model) {
+        const codes = await prisma.$queryRaw<{ chassis_code: string; cnt: number }[]>`
+          SELECT chassis_code, COUNT(*)::int as cnt FROM auctions
+          WHERE status = 'upcoming' AND maker = ${maker} AND model = ${model}
+            AND chassis_code IS NOT NULL AND chassis_code != ''
+          GROUP BY chassis_code ORDER BY cnt DESC LIMIT 30
+        `;
+        chassisCodes = codes.map(c => ({ value: c.chassis_code, count: c.cnt }));
+      }
+
+      res.json({
+        models: models.map(m => ({ value: m.model, count: m.cnt })),
+        chassisCodes,
+      });
       return;
     }
 
