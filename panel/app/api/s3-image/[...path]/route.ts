@@ -10,7 +10,7 @@ export async function GET(
   const key = path.join("/");
 
   // Validate: only allow ninja-images/xxx.jpg or taa-images/xxx.jpg
-  if (!/^(ninja-images|taa-images)\/[a-f0-9]+\.jpg$/.test(key)) {
+  if (!/^(ninja-images|taa-images|iauc-images)\/[a-f0-9]+\.jpg$/.test(key)) {
     return new NextResponse("Not found", { status: 404 });
   }
 
