@@ -58,7 +58,25 @@ def upsert_auctions(vehicles: list[dict]) -> dict:
                         )
                         ON CONFLICT (item_id) DO UPDATE SET
                             last_updated = NOW(),
-                            status = EXCLUDED.status
+                            status = EXCLUDED.status,
+                            lot_number = COALESCE(NULLIF(EXCLUDED.lot_number, ''), auctions.lot_number),
+                            maker = COALESCE(NULLIF(EXCLUDED.maker, ''), auctions.maker),
+                            model = COALESCE(NULLIF(EXCLUDED.model, ''), auctions.model),
+                            grade = COALESCE(EXCLUDED.grade, auctions.grade),
+                            chassis_code = COALESCE(EXCLUDED.chassis_code, auctions.chassis_code),
+                            engine_specs = COALESCE(EXCLUDED.engine_specs, auctions.engine_specs),
+                            year = COALESCE(NULLIF(EXCLUDED.year, ''), auctions.year),
+                            mileage = COALESCE(EXCLUDED.mileage, auctions.mileage),
+                            color = COALESCE(EXCLUDED.color, auctions.color),
+                            rating = COALESCE(EXCLUDED.rating, auctions.rating),
+                            start_price = COALESCE(EXCLUDED.start_price, auctions.start_price),
+                            auction_date = COALESCE(NULLIF(EXCLUDED.auction_date, ''), auctions.auction_date),
+                            auction_house = COALESCE(NULLIF(EXCLUDED.auction_house, ''), auctions.auction_house),
+                            location = COALESCE(NULLIF(EXCLUDED.location, ''), auctions.location),
+                            image_url = COALESCE(EXCLUDED.image_url, auctions.image_url),
+                            images = CASE WHEN jsonb_array_length(EXCLUDED.images) > 0 THEN EXCLUDED.images ELSE auctions.images END,
+                            exhibit_sheet = COALESCE(EXCLUDED.exhibit_sheet, auctions.exhibit_sheet),
+                            inspection_expiry = COALESCE(EXCLUDED.inspection_expiry, auctions.inspection_expiry)
                         RETURNING (xmax = 0) AS is_new
                     """),
                     {

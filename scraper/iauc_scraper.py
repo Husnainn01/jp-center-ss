@@ -1,18 +1,25 @@
-"""iAUC scraper: Select all upcoming auctions, all makers, batch by 20 models.
-Simplified: select all at once instead of day-by-day or maker-by-maker."""
+"""iAUC scraper: Select upcoming auctions, all makers, batch models.
+Uses JS checkbox clicks (not mouse), supports pagination.
+Limits: 500 vehicles & 30 min per batch cycle, smallest models first."""
 
 import asyncio
 import base64
 import re
+import time
 from playwright.async_api import Page, BrowserContext
 from db import upsert_auctions, get_existing_item_ids
 from storage import upload_image
 
 BATCH_SIZE = 20
+MAX_VEHICLES_TOTAL = 2000
+MAX_TIME_TOTAL = 5400  # 90 minutes total
+MAX_RESULTS_PER_BATCH = 200  # Don't paginate forever within one batch
 
 
 async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[str]:
     """Full iAUC scrape."""
+
+    scrape_start = time.time()
 
     existing_ids = get_existing_item_ids("iauc")
     print(f"  [iauc] {len(existing_ids)} existing vehicles in DB (will skip)")
@@ -66,7 +73,6 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
 
     # === Step 3: Select ALL Japanese + Imported makers ===
     print("  [iauc] Selecting all makers...")
-    # Click the two visible "All" buttons (Japanese + Imported)
     await page.evaluate("""() => {
         const allBtns = Array.from(document.querySelectorAll('button'))
             .filter(b => b.textContent.trim() === 'All' && b.offsetParent !== null);
@@ -92,53 +98,62 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     makers_checked = await page.evaluate('() => document.querySelectorAll(\'input[name="maker[]"]:checked\').length')
     print(f"  [iauc] {makers_checked} makers selected")
 
-    # === Step 4: Get all models ===
+    # === Step 4: Get all models, sort smallest first ===
     models = await page.evaluate("""() => {
         const items = [];
-        document.querySelectorAll('input[name="type[]"]').forEach(inp => {
+        document.querySelectorAll('input[name="type[]"]').forEach((inp, idx) => {
             const name = inp.getAttribute('data-name') || '';
             const cnt = parseInt(inp.getAttribute('data-cnt') || '0');
-            const li = inp.closest('li');
-            if (li && cnt > 0) {
-                const r = li.getBoundingClientRect();
-                items.push({ name, cnt, x: r.x + r.width/2, y: r.y + r.height/2, visible: r.y > 0 });
+            if (cnt > 0) {
+                items.push({ name, cnt, idx });
             }
         });
+        // Sort smallest first so small models get scraped before time runs out
+        items.sort((a, b) => a.cnt - b.cnt);
         return items;
     }""")
 
-    visible_models = [m for m in models if m['visible']]
-    total_cars = sum(m['cnt'] for m in visible_models)
-    print(f"  [iauc] {len(visible_models)} models visible, {total_cars} total vehicles")
+    total_cars = sum(m['cnt'] for m in models)
+    print(f"  [iauc] {len(models)} models, {total_cars} total vehicles (sorted smallest first)")
+    print(f"  [iauc] Limits: {MAX_VEHICLES_TOTAL} vehicles, {MAX_TIME_TOTAL // 60} min total")
 
     if total_cars == 0:
         return []
 
-    # === Step 5: Batch by 20 models, search each batch ===
+    # === Step 5: Batch models, search each batch ===
     all_ids = []
 
-    for batch_start in range(0, len(visible_models), BATCH_SIZE):
-        batch = visible_models[batch_start:batch_start + BATCH_SIZE]
+    for batch_start in range(0, len(models), BATCH_SIZE):
+        # Check global limits
+        elapsed = time.time() - scrape_start
+        if elapsed >= MAX_TIME_TOTAL:
+            print(f"  [iauc] Time limit reached ({elapsed/60:.1f} min), stopping")
+            break
+        if len(all_ids) >= MAX_VEHICLES_TOTAL:
+            print(f"  [iauc] Vehicle limit reached ({len(all_ids)}/{MAX_VEHICLES_TOTAL}), stopping")
+            break
+
+        batch = models[batch_start:batch_start + BATCH_SIZE]
         batch_num = batch_start // BATCH_SIZE + 1
         batch_total = sum(m['cnt'] for m in batch)
         batch_names = [m['name'] for m in batch[:3]]
 
         print(f"  [iauc] Batch {batch_num}: {len(batch)} models ({batch_total} vehicles) [{', '.join(batch_names)}...]")
 
-        # Clear previous model selection
+        # Clear previous model selection via JS
         await page.evaluate("""() => {
-            document.querySelectorAll('input[name="type[]"]:checked').forEach(inp => {
-                const li = inp.closest('li');
-                if (li) li.click();
-            });
+            document.querySelectorAll('input[name="type[]"]:checked').forEach(inp => inp.click());
         }""")
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
 
-        # Select models in this batch via mouse click
-        for m in batch:
-            if m['y'] > 0:
-                await page.mouse.click(m['x'], m['y'])
-                await asyncio.sleep(0.15)
+        # Select models in this batch via JS checkbox click (not mouse — works off-screen)
+        batch_indices = [m['idx'] for m in batch]
+        await page.evaluate("""(indices) => {
+            const inputs = document.querySelectorAll('input[name="type[]"]');
+            indices.forEach(idx => {
+                if (inputs[idx] && !inputs[idx].checked) inputs[idx].click();
+            });
+        }""", batch_indices)
         await asyncio.sleep(1)
 
         # Enable and click Next
@@ -165,73 +180,113 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                 break
             await asyncio.sleep(2)
 
-        # Get vehicle IDs
-        vehicle_ids = await page.evaluate("""() => {
-            const items = [];
-            const seen = new Set();
-            document.querySelectorAll('img[data-code]').forEach(img => {
-                const code = img.getAttribute('data-code');
-                if (code && !seen.has(code)) {
-                    seen.add(code);
-                    items.push(code);
-                }
-            });
-            return items;
-        }""")
+        # Paginate through results for this batch
+        batch_ids = []
+        page_num = 0
+        while True:
+            page_num += 1
 
-        new_ids = [vid for vid in vehicle_ids if f"iauc-{vid}" not in existing_ids]
-        print(f"  [iauc] Batch {batch_num}: {len(vehicle_ids)} on page ({len(new_ids)} new)")
+            # Check limits
+            if len(all_ids) + len(batch_ids) >= MAX_VEHICLES_TOTAL:
+                break
+            if time.time() - scrape_start >= MAX_TIME_TOTAL:
+                break
+            if len(batch_ids) >= MAX_RESULTS_PER_BATCH:
+                print(f"  [iauc] Batch {batch_num}: result limit reached ({len(batch_ids)})")
+                break
 
-        # Extract each vehicle
-        vehicles = []
-        for vid in new_ids:
-            try:
-                v = await _extract_vehicle(page, vid, tid)
-                if v and v.get("item_id"):
-                    vehicles.append(v)
-            except Exception as e:
-                print(f"  [iauc] Detail {vid} failed: {e}")
-
-        if vehicles:
-            result = upsert_auctions(vehicles)
-            all_ids.extend(v["item_id"] for v in vehicles)
-            existing_ids.update(v["item_id"] for v in vehicles)
-            img_total = sum(len(v.get("images", [])) for v in vehicles)
-            print(f"  [iauc] Batch {batch_num}: {len(vehicles)} → DB (new:{result['new']}, imgs:{img_total})")
-
-        # Track all IDs
-        for vid in vehicle_ids:
-            item_id = f"iauc-{vid}"
-            if item_id not in all_ids:
-                all_ids.append(item_id)
-
-        # TODO: handle pagination within this batch (Next page button)
-
-        # Reload Make & Model page fresh (going back loses state)
-        search_url = page.url.split("#")[0] + "#maker" if "search" in page.url else ""
-        if not search_url:
-            # Find the search URL from any link
-            search_url = await page.evaluate("""() => {
-                for (const a of document.querySelectorAll('a[href*="vehicle/search"]')) {
-                    return a.href.split('#')[0] + '#maker';
-                }
-                return '';
+            # Get vehicle IDs on current page (short format only: XX-XXXX-XXXX)
+            vehicle_ids = await page.evaluate("""() => {
+                const items = [];
+                const seen = new Set();
+                document.querySelectorAll('img[data-code]').forEach(img => {
+                    const code = img.getAttribute('data-code');
+                    if (!code) return;
+                    // Only use short codes (3 parts). Long codes (6 parts) return "Not Found" on detail page
+                    const parts = code.split('-');
+                    const shortCode = parts.length > 3 ? parts.slice(0, 3).join('-') : code;
+                    if (!seen.has(shortCode)) {
+                        seen.add(shortCode);
+                        items.push(shortCode);
+                    }
+                });
+                return items;
             }""")
-        if search_url:
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+
+            if not vehicle_ids:
+                break
+
+            new_ids = [vid for vid in vehicle_ids if f"iauc-{vid}" not in existing_ids]
+            skipped = len(vehicle_ids) - len(new_ids)
+            if page_num == 1:
+                print(f"  [iauc] Batch {batch_num} p{page_num}: {len(vehicle_ids)} on page ({len(new_ids)} new, {skipped} existing)")
+            else:
+                print(f"  [iauc] Batch {batch_num} p{page_num}: {len(vehicle_ids)} ({len(new_ids)} new)")
+
+            # Extract each new vehicle
+            vehicles = []
+            for vid in new_ids:
+                try:
+                    v = await _extract_vehicle(page, vid, tid)
+                    if v and v.get("item_id"):
+                        vehicles.append(v)
+                except Exception as e:
+                    print(f"  [iauc] Detail {vid} failed: {e}")
+
+            if vehicles:
+                result = upsert_auctions(vehicles)
+                all_ids.extend(v["item_id"] for v in vehicles)
+                existing_ids.update(v["item_id"] for v in vehicles)
+                img_total = sum(len(v.get("images", [])) for v in vehicles)
+                print(f"  [iauc] Batch {batch_num} p{page_num}: {len(vehicles)} → DB (new:{result['new']}, imgs:{img_total})")
+
+            # Track all IDs (including skipped existing)
+            for vid in vehicle_ids:
+                item_id = f"iauc-{vid}"
+                if item_id not in batch_ids:
+                    batch_ids.append(item_id)
+
+            # Try next page
+            has_next = await page.evaluate("""() => {
+                const links = document.querySelectorAll('a');
+                for (const a of links) {
+                    if (a.textContent.trim() === 'Next' && a.getAttribute('onclick') && a.getAttribute('onclick').includes('get_carlist')) {
+                        a.click();
+                        return true;
+                    }
+                }
+                return false;
+            }""")
+            if not has_next:
+                break
             await asyncio.sleep(5)
-            # Re-select all makers
-            await page.evaluate("""() => {
-                const allBtns = Array.from(document.querySelectorAll('button'))
-                    .filter(b => b.textContent.trim() === 'All' && b.offsetParent !== null);
-                allBtns.forEach(b => b.click());
-            }""")
-            await asyncio.sleep(3)
-        else:
-            print("  [iauc] Could not find search URL, stopping batches")
-            break
 
-    print(f"  [iauc] Total: {len(all_ids)} vehicles")
+            # Wait for new results to load
+            for _ in range(10):
+                cnt = await page.evaluate("() => document.querySelectorAll('img[data-code]').length")
+                if cnt > 0:
+                    break
+                await asyncio.sleep(2)
+
+        # Add batch IDs to total
+        for bid in batch_ids:
+            if bid not in all_ids:
+                all_ids.append(bid)
+
+        # Reload Make & Model page fresh for next batch
+        search_url = search_base_url + "#maker"
+        await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+        await asyncio.sleep(5)
+        # Re-select all makers
+        await page.evaluate("""() => {
+            const allBtns = Array.from(document.querySelectorAll('button'))
+                .filter(b => b.textContent.trim() === 'All' && b.offsetParent !== null);
+            allBtns.forEach(b => b.click());
+        }""")
+        await asyncio.sleep(3)
+
+    elapsed = time.time() - scrape_start
+    print(f"  [iauc] Total: {len(all_ids)} vehicles in {elapsed/60:.1f} min")
     return all_ids
 
 
@@ -262,29 +317,31 @@ async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None
     if not vehicle.get("maker"):
         return None
 
-    # Get images
+    # Get images — iauc_pic URLs contain car photos and exhibit sheets
     imgs = await page.evaluate("""() => {
         return Array.from(document.querySelectorAll('img'))
-            .filter(i => i.src && i.src.includes('iauc_pic'))
+            .filter(i => i.src && i.src.includes('iauc_pic') && i.naturalWidth > 100)
             .map(i => ({ src: i.src, w: i.naturalWidth, h: i.naturalHeight }));
     }""")
 
     car_urls = []
     sheet_url = None
+    seen_urls = set()
     for img in imgs:
         src = img['src']
-        # Pattern 1: /A09008.JPG
-        letter_match = re.search(r'/([A-F])\d+\.JPG', src)
-        if letter_match:
-            if letter_match.group(1) == 'A':
-                sheet_url = src
-            else:
-                car_urls.append(src)
+        # Dedupe by base filename (ignore query params)
+        base = src.split('?')[0]
+        if base in seen_urls:
             continue
-        # Pattern 2: _scan.jpg / _1.jpg
-        if '_scan.' in src:
-            sheet_url = src
-        elif re.search(r'_\d+\.jpg', src):
+        seen_urls.add(base)
+
+        filename = base.split('/')[-1].upper()
+        # Exhibit sheet: starts with A (e.g., A05009.JPG) or contains _scan
+        if re.match(r'^A\d+\.JPG', filename) or '_scan.' in src.lower():
+            if not sheet_url:
+                sheet_url = src
+        else:
+            # Car photos: everything else (B, C, D, F, R, V patterns, numbered, etc.)
             car_urls.append(src)
 
     # Parallel upload
@@ -334,7 +391,14 @@ def _parse_detail(text: str, vehicle_id: str) -> dict:
         if line in known_makers:
             maker = line
             if i + 1 < len(lines):
-                model = lines[i + 1].strip()
+                raw_model = lines[i + 1].strip()
+                # Strip chassis code (e.g., "Prius ZVW30-5355115" → "Prius")
+                # Chassis codes look like: ABC123-456789 or ABC12 (caps+digits pattern)
+                model = re.split(r'\s+[A-Z0-9]{3,}-', raw_model)[0].strip()
+                if not model:
+                    model = raw_model
+                # Also strip standalone chassis codes like "ZVW55" at end
+                model = re.sub(r'\s+[A-Z]{1,4}\d{2,}$', '', model).strip()
             break
 
     lot_no = fields.get("Lot No.", "")
