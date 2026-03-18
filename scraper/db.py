@@ -3,6 +3,7 @@
 import os
 import re
 import json
+from datetime import date, datetime
 from decimal import Decimal
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -15,6 +16,31 @@ engine = create_engine(DATABASE_URL, echo=False, pool_size=5)
 Session = sessionmaker(bind=engine)
 
 BATCH_SIZE = 200
+
+MONTH_MAP = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+             "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
+
+
+def normalize_auction_date(date_str: str, source: str) -> date | None:
+    """Parse auction_date string into a proper date object."""
+    if not date_str:
+        return None
+    try:
+        # USS: 2026/03/18
+        m = re.match(r'^(\d{4})/(\d{2})/(\d{2})', date_str)
+        if m:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        # TAA: 3/18 (no year, assume current year)
+        m = re.match(r'^(\d{1,2})/(\d{1,2})$', date_str)
+        if m:
+            return date(datetime.now().year, int(m.group(1)), int(m.group(2)))
+        # iAUC: Mar 19.2026 12:25
+        m = re.match(r'^(\w{3})\s+(\d{1,2})\.(\d{4})', date_str)
+        if m and m.group(1) in MONTH_MAP:
+            return date(int(m.group(3)), MONTH_MAP[m.group(1)], int(m.group(2)))
+    except (ValueError, KeyError):
+        pass
+    return None
 
 
 def upsert_auctions(vehicles: list[dict]) -> dict:
@@ -48,13 +74,13 @@ def upsert_auctions(vehicles: list[dict]) -> dict:
                             engine_specs, year, mileage, color, rating, start_price,
                             auction_date, auction_house, location, status,
                             image_url, images, exhibit_sheet, inspection_expiry,
-                            source, first_seen, last_updated
+                            source, auction_date_norm, first_seen, last_updated
                         ) VALUES (
                             :item_id, :lot_number, :maker, :model, :grade, :chassis_code,
                             :engine_specs, :year, :mileage, :color, :rating, :start_price,
                             :auction_date, :auction_house, :location, :status,
                             :image_url, CAST(:images AS jsonb), :exhibit_sheet, :inspection_expiry,
-                            :source, NOW(), NOW()
+                            :source, :auction_date_norm, NOW(), NOW()
                         )
                         ON CONFLICT (item_id) DO UPDATE SET
                             last_updated = NOW(),
@@ -76,7 +102,8 @@ def upsert_auctions(vehicles: list[dict]) -> dict:
                             image_url = COALESCE(EXCLUDED.image_url, auctions.image_url),
                             images = CASE WHEN jsonb_array_length(EXCLUDED.images) > 0 THEN EXCLUDED.images ELSE auctions.images END,
                             exhibit_sheet = COALESCE(EXCLUDED.exhibit_sheet, auctions.exhibit_sheet),
-                            inspection_expiry = COALESCE(EXCLUDED.inspection_expiry, auctions.inspection_expiry)
+                            inspection_expiry = COALESCE(EXCLUDED.inspection_expiry, auctions.inspection_expiry),
+                            auction_date_norm = COALESCE(EXCLUDED.auction_date_norm, auctions.auction_date_norm)
                         RETURNING (xmax = 0) AS is_new
                     """),
                     {
@@ -101,6 +128,7 @@ def upsert_auctions(vehicles: list[dict]) -> dict:
                         "exhibit_sheet": v.get("exhibit_sheet"),
                         "inspection_expiry": v.get("inspection_expiry"),
                         "source": v.get("source", "aucnet"),
+                        "auction_date_norm": normalize_auction_date(v.get("auction_date", ""), v.get("source", "")),
                     },
                 )
                 row = result.fetchone()

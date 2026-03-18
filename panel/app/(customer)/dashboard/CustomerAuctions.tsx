@@ -9,10 +9,11 @@ import { formatPrice } from "@/lib/format";
 import { proxyUrl } from "@/lib/image";
 import { Button } from "@/components/ui/button";
 import {
-  Search, ChevronLeft, ChevronRight, Car, LayoutGrid, AlignJustify, X, SlidersHorizontal,
+  ChevronLeft, ChevronRight, Car, LayoutGrid, AlignJustify, X, Calendar,
 } from "lucide-react";
 
 interface FilterOption { value: string; count: number }
+interface DayOption { date: string; count: number }
 interface Props {
   auctions: AuctionSerialized[];
   page: number;
@@ -23,19 +24,34 @@ interface Props {
     makers: FilterOption[];
     locations: FilterOption[];
     auctionHouses: FilterOption[];
+    auctionDays?: DayOption[];
   };
 }
 
-const dd = "h-[30px] rounded border border-input bg-card px-2 text-[11px] w-full focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary cursor-pointer appearance-none";
+const sel = "h-9 rounded-md border border-input bg-card px-3 text-xs w-full focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary cursor-pointer appearance-none";
+
+function formatDayLabel(dateStr: string): { label: string; day: string; weekday: string } {
+  const d = new Date(dateStr + "T00:00:00");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const day = d.getDate().toString();
+  const weekday = d.toLocaleDateString("en", { weekday: "short" });
+
+  if (d.getTime() === today.getTime()) return { label: "Today", day, weekday: "" };
+  if (d.getTime() === tomorrow.getTime()) return { label: "Tomorrow", day, weekday: "" };
+  return { label: weekday, day, weekday };
+}
+
+const YEARS = Array.from({ length: 30 }, (_, i) => (2026 - i).toString());
 
 function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
   const router = useRouter();
   const sp = useSearchParams();
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [models, setModels] = useState<FilterOption[]>([]);
-  const [showFilters, setShowFilters] = useState(true);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const get = useCallback((k: string) => sp.get(k) ?? "", [sp]);
 
@@ -59,11 +75,6 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
     router.push(`/dashboard?${params.toString()}`);
   }
 
-  function debouncedUpdate(updates: Record<string, string>) {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => update(updates), 400);
-  }
-
   function clearAll() { router.push("/dashboard"); }
   function goPage(p: number) {
     const params = new URLSearchParams(sp.toString());
@@ -71,152 +82,199 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
     router.push(`/dashboard?${params.toString()}`);
   }
 
-  const filterKeys = ["maker", "model", "location", "auctionHouse", "minPrice", "maxPrice", "rating", "search"];
+  const filterKeys = ["auctionDay", "maker", "model", "location", "auctionHouse", "minPrice", "maxPrice", "rating", "yearFrom", "yearTo"];
   const activeFilters = filterKeys.filter(k => get(k)).length;
+  const auctionDays = filterOptions.auctionDays || [];
 
   return (
-    <div className="space-y-2">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <h1 className="text-base font-bold tracking-tight">Vehicles</h1>
-          <span className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full font-medium">
-            {total.toLocaleString()}
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-bold tracking-tight">Auction Vehicles</h1>
+          <span className="text-xs text-muted-foreground bg-muted px-2.5 py-1 rounded-full font-medium">
+            {total.toLocaleString()} vehicles
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <Button
-            variant={showFilters ? "default" : "outline"}
-            size="sm"
-            className="h-7 text-[11px] gap-1"
-            onClick={() => setShowFilters(!showFilters)}
-          >
-            <SlidersHorizontal className="h-3 w-3" />
-            Filters
-            {activeFilters > 0 && (
-              <span className="bg-background/20 text-[9px] px-1 rounded-full">{activeFilters}</span>
-            )}
-          </Button>
-          <div className="flex border rounded overflow-hidden h-7">
-            <button onClick={() => setViewMode("grid")} className={`px-2 transition-colors ${viewMode === "grid" ? "bg-foreground text-background" : "hover:bg-accent"}`}>
-              <LayoutGrid className="h-3 w-3" />
+        <div className="flex items-center gap-2">
+          <div className="flex border rounded-md overflow-hidden h-8">
+            <button onClick={() => setViewMode("grid")} className={`px-2.5 transition-colors ${viewMode === "grid" ? "bg-foreground text-background" : "hover:bg-accent"}`}>
+              <LayoutGrid className="h-3.5 w-3.5" />
             </button>
-            <button onClick={() => setViewMode("list")} className={`px-2 transition-colors ${viewMode === "list" ? "bg-foreground text-background" : "hover:bg-accent"}`}>
-              <AlignJustify className="h-3 w-3" />
+            <button onClick={() => setViewMode("list")} className={`px-2.5 transition-colors ${viewMode === "list" ? "bg-foreground text-background" : "hover:bg-accent"}`}>
+              <AlignJustify className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Filter bar — single row */}
-      {showFilters && (
-        <div className="bg-card border rounded-lg px-3 py-2 flex items-center gap-2 overflow-x-auto">
-          <div className="relative flex-shrink-0">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-            <input
-              ref={searchRef}
-              type="text"
-              placeholder="Search..."
-              defaultValue={get("search")}
-              onChange={e => debouncedUpdate({ search: e.target.value })}
-              className="h-[32px] w-[160px] rounded border border-input bg-background pl-7 pr-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary/40"
-            />
+      {/* Auction Day Picker */}
+      {auctionDays.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-muted-foreground" />
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Auction Days</span>
           </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <button
+              onClick={() => update({ auctionDay: "" })}
+              className={`flex-shrink-0 px-4 py-2.5 rounded-lg border text-xs font-medium transition-all ${
+                !get("auctionDay")
+                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                  : "bg-card hover:bg-accent border-input"
+              }`}
+            >
+              All Days
+            </button>
+            {auctionDays.map(d => {
+              const { label, day } = formatDayLabel(d.date);
+              const isSelected = get("auctionDay") === d.date;
+              return (
+                <button
+                  key={d.date}
+                  onClick={() => update({ auctionDay: isSelected ? "" : d.date })}
+                  className={`flex-shrink-0 min-w-[80px] px-3 py-2 rounded-lg border text-center transition-all ${
+                    isSelected
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                      : "bg-card hover:bg-accent border-input"
+                  }`}
+                >
+                  <div className="text-[10px] font-medium opacity-70">{label}</div>
+                  <div className="text-lg font-bold leading-tight">{day}</div>
+                  <div className="text-[10px] opacity-60">{d.count.toLocaleString()}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-          <select value={get("maker")} onChange={e => update({ maker: e.target.value })} className={`${dd} !w-auto min-w-[100px]`}>
-            <option value="">Maker</option>
+      {/* Filters */}
+      <div className="bg-card border rounded-lg p-4 space-y-3">
+        {/* Row 1: Make, Model, Year range */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <select value={get("maker")} onChange={e => update({ maker: e.target.value })} className={sel}>
+            <option value="">All Makes</option>
             {filterOptions.makers.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
           </select>
 
-          {(models.length > 0 || get("maker")) && (
-            <select value={get("model")} onChange={e => update({ model: e.target.value })} className={`${dd} !w-auto min-w-[90px]`} disabled={models.length === 0}>
-              <option value="">{models.length ? "Model" : "..."}</option>
-              {models.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
-            </select>
-          )}
+          <select value={get("model")} onChange={e => update({ model: e.target.value })} className={sel} disabled={models.length === 0 && !get("maker")}>
+            <option value="">{get("maker") ? (models.length ? "All Models" : "Loading...") : "Select Make first"}</option>
+            {models.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
+          </select>
 
-          <select value={get("auctionHouse")} onChange={e => update({ auctionHouse: e.target.value })} className={`${dd} !w-auto min-w-[110px]`}>
-            <option value="">Auction</option>
+          <select value={get("yearFrom")} onChange={e => update({ yearFrom: e.target.value })} className={sel}>
+            <option value="">Year From</option>
+            {YEARS.slice().reverse().map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+
+          <select value={get("yearTo")} onChange={e => update({ yearTo: e.target.value })} className={sel}>
+            <option value="">Year To</option>
+            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+
+        {/* Row 2: Auction House, Price, Rating, Sort */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <select value={get("auctionHouse")} onChange={e => update({ auctionHouse: e.target.value })} className={sel}>
+            <option value="">All Auctions</option>
             {filterOptions.auctionHouses.map(h => <option key={h.value} value={h.value}>{h.value} ({h.count})</option>)}
           </select>
 
-          <select value={get("location")} onChange={e => update({ location: e.target.value })} className={`${dd} !w-auto min-w-[90px]`}>
-            <option value="">Location</option>
-            {filterOptions.locations.map(l => <option key={l.value} value={l.value}>{l.value} ({l.count})</option>)}
+          <select value={get("minPrice")} onChange={e => update({ minPrice: e.target.value })} className={sel}>
+            <option value="">Min Price</option>
+            <option value="10000">¥10,000+</option>
+            <option value="50000">¥50,000+</option>
+            <option value="100000">¥100,000+</option>
+            <option value="300000">¥300,000+</option>
+            <option value="500000">¥500,000+</option>
+            <option value="1000000">¥1,000,000+</option>
+            <option value="3000000">¥3,000,000+</option>
+            <option value="5000000">¥5,000,000+</option>
           </select>
 
-          <select value={get("rating")} onChange={e => update({ rating: e.target.value })} className={`${dd} !w-auto min-w-[70px]`}>
-            <option value="">Rating</option>
-            <option value="S">S</option><option value="6">6+</option><option value="5">5+</option>
-            <option value="4.5">4.5+</option><option value="4">4+</option><option value="3.5">3.5+</option>
+          <select value={get("maxPrice")} onChange={e => update({ maxPrice: e.target.value })} className={sel}>
+            <option value="">Max Price</option>
+            <option value="50000">~¥50,000</option>
+            <option value="100000">~¥100,000</option>
+            <option value="300000">~¥300,000</option>
+            <option value="500000">~¥500,000</option>
+            <option value="1000000">~¥1,000,000</option>
+            <option value="3000000">~¥3,000,000</option>
+            <option value="5000000">~¥5,000,000</option>
+            <option value="10000000">~¥10,000,000</option>
           </select>
 
-          <select value={get("minPrice")} onChange={e => update({ minPrice: e.target.value })} className={`${dd} !w-auto min-w-[80px]`}>
-            <option value="">Min ¥</option>
-            <option value="10000">¥10K+</option><option value="50000">¥50K+</option><option value="100000">¥100K+</option>
-            <option value="300000">¥300K+</option><option value="500000">¥500K+</option><option value="1000000">¥1M+</option>
+          <select value={get("rating")} onChange={e => update({ rating: e.target.value })} className={sel}>
+            <option value="">Any Rating</option>
+            <option value="S">S</option>
+            <option value="6">6+</option>
+            <option value="5">5+</option>
+            <option value="4.5">4.5+</option>
+            <option value="4">4+</option>
+            <option value="3.5">3.5+</option>
           </select>
 
-          <select value={get("maxPrice")} onChange={e => update({ maxPrice: e.target.value })} className={`${dd} !w-auto min-w-[80px]`}>
-            <option value="">Max ¥</option>
-            <option value="50000">~¥50K</option><option value="100000">~¥100K</option><option value="300000">~¥300K</option>
-            <option value="500000">~¥500K</option><option value="1000000">~¥1M</option><option value="3000000">~¥3M</option>
+          <select value={get("sort") || "firstSeen"} onChange={e => update({ sort: e.target.value })} className={sel}>
+            <option value="firstSeen">Sort: Newest</option>
+            <option value="auctionDateNorm">Sort: Auction Date</option>
+            <option value="startPrice">Sort: Price</option>
+            <option value="maker">Sort: Maker</option>
+            <option value="year">Sort: Year</option>
           </select>
-
-          <select value={get("sort") || "firstSeen"} onChange={e => update({ sort: e.target.value })} className={`${dd} !w-auto min-w-[80px]`}>
-            <option value="firstSeen">Newest</option><option value="auctionDate">Date</option>
-            <option value="startPrice">Price</option><option value="maker">Maker</option>
-          </select>
-
-          {activeFilters > 0 && (
-            <button onClick={clearAll} className="h-[32px] px-2.5 rounded border border-destructive/30 text-destructive text-[10px] font-medium hover:bg-destructive/5 transition-colors flex items-center gap-1 flex-shrink-0">
-              <X className="h-2.5 w-2.5" /> Clear
-            </button>
-          )}
         </div>
-      )}
+
+        {/* Clear filters */}
+        {activeFilters > 0 && (
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-xs text-muted-foreground">{activeFilters} filter{activeFilters > 1 ? "s" : ""} active</span>
+            <button onClick={clearAll} className="h-8 px-3 rounded-md border border-destructive/30 text-destructive text-xs font-medium hover:bg-destructive/5 transition-colors flex items-center gap-1.5">
+              <X className="h-3 w-3" /> Clear All Filters
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Empty state */}
       {auctions.length === 0 ? (
         <div className="py-20 text-center">
-          <Car className="h-8 w-8 mx-auto text-muted-foreground/20 mb-2" />
-          <p className="text-xs text-muted-foreground">No vehicles match your filters</p>
+          <Car className="h-10 w-10 mx-auto text-muted-foreground/20 mb-3" />
+          <p className="text-sm text-muted-foreground">No vehicles match your filters</p>
           {activeFilters > 0 && (
-            <button onClick={clearAll} className="text-[11px] text-primary hover:underline mt-1">Clear filters</button>
+            <button onClick={clearAll} className="text-xs text-primary hover:underline mt-2">Clear all filters</button>
           )}
         </div>
       ) : viewMode === "grid" ? (
         /* Grid */
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {auctions.map(a => (
             <Link key={a.id} href={`/dashboard/${a.id}`} className="group">
               <div className="bg-card border rounded-lg overflow-hidden hover:shadow-md hover:border-primary/20 transition-all duration-150">
                 <div className="aspect-[16/10] bg-muted relative overflow-hidden">
                   {a.imageUrl ? (
-                    <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover group-hover:scale-[1.03] transition-transform duration-200" sizes="(max-width: 640px) 50vw, 20vw" loading="lazy" unoptimized />
+                    <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover group-hover:scale-[1.03] transition-transform duration-200" sizes="(max-width: 640px) 50vw, 25vw" loading="lazy" unoptimized />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-muted-foreground/20"><Car className="h-5 w-5" /></div>
+                    <div className="w-full h-full flex items-center justify-center text-muted-foreground/20"><Car className="h-6 w-6" /></div>
                   )}
                   {a.rating && (
-                    <span className="absolute top-1 right-1 text-[8px] font-bold bg-black/60 text-white px-1 py-0.5 rounded">
+                    <span className="absolute top-1.5 right-1.5 text-[9px] font-bold bg-black/60 text-white px-1.5 py-0.5 rounded">
                       {a.rating}
                     </span>
                   )}
                 </div>
-                <div className="p-2.5 space-y-1">
-                  <p className="text-xs font-semibold truncate leading-tight group-hover:text-primary transition-colors">
+                <div className="p-3 space-y-1.5">
+                  <p className="text-sm font-semibold truncate leading-tight group-hover:text-primary transition-colors">
                     {a.maker} {a.model}
                   </p>
-                  <p className="text-[10px] text-muted-foreground truncate">
+                  <p className="text-xs text-muted-foreground truncate">
                     {[a.year, a.mileage, a.color].filter(Boolean).join(" · ")}
                   </p>
                   <div className="flex items-center justify-between pt-0.5">
-                    <span className="text-xs font-bold">
+                    <span className="text-sm font-bold">
                       {a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}
                     </span>
-                    {a.rating && <span className="text-[9px] font-bold bg-muted px-1 py-0.5 rounded">{a.rating}</span>}
                   </div>
-                  <p className="text-[9px] text-muted-foreground truncate">{a.auctionHouse} · {a.auctionDate}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{a.auctionHouse} · {a.auctionDate}</p>
                 </div>
               </div>
             </Link>
@@ -225,48 +283,48 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
       ) : (
         /* List — data-dense table */
         <div className="bg-card border rounded-lg overflow-hidden">
-          <table className="w-full text-[11px]">
+          <table className="w-full text-xs">
             <thead>
               <tr className="border-b bg-muted/40">
-                <th className="text-left font-medium text-muted-foreground px-3 py-2 w-[50px]"></th>
-                <th className="text-left font-medium text-muted-foreground px-2 py-2">Vehicle</th>
-                <th className="text-left font-medium text-muted-foreground px-2 py-2 hidden md:table-cell">Auction</th>
-                <th className="text-left font-medium text-muted-foreground px-2 py-2 hidden lg:table-cell">Specs</th>
-                <th className="text-center font-medium text-muted-foreground px-2 py-2 hidden sm:table-cell w-[50px]">Score</th>
-                <th className="text-left font-medium text-muted-foreground px-2 py-2 hidden lg:table-cell">Date</th>
-                <th className="text-right font-medium text-muted-foreground px-3 py-2">Price</th>
+                <th className="text-left font-medium text-muted-foreground px-3 py-2.5 w-[56px]"></th>
+                <th className="text-left font-medium text-muted-foreground px-2 py-2.5">Vehicle</th>
+                <th className="text-left font-medium text-muted-foreground px-2 py-2.5 hidden md:table-cell">Auction</th>
+                <th className="text-left font-medium text-muted-foreground px-2 py-2.5 hidden lg:table-cell">Specs</th>
+                <th className="text-center font-medium text-muted-foreground px-2 py-2.5 hidden sm:table-cell w-[60px]">Score</th>
+                <th className="text-left font-medium text-muted-foreground px-2 py-2.5 hidden lg:table-cell">Date</th>
+                <th className="text-right font-medium text-muted-foreground px-3 py-2.5">Price</th>
               </tr>
             </thead>
             <tbody>
               {auctions.map(a => (
                 <tr key={a.id} className="border-b last:border-0 hover:bg-accent/40 transition-colors cursor-pointer group" onClick={() => router.push(`/dashboard/${a.id}`)}>
-                  <td className="px-3 py-1.5">
-                    <div className="w-[42px] h-[30px] rounded overflow-hidden bg-muted relative">
+                  <td className="px-3 py-2">
+                    <div className="w-[48px] h-[34px] rounded overflow-hidden bg-muted relative">
                       {a.imageUrl ? (
-                        <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="42px" loading="lazy" unoptimized />
+                        <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="48px" loading="lazy" unoptimized />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-muted-foreground/20"><Car className="h-3 w-3" /></div>
+                        <div className="w-full h-full flex items-center justify-center text-muted-foreground/20"><Car className="h-3.5 w-3.5" /></div>
                       )}
                     </div>
                   </td>
-                  <td className="px-2 py-1.5">
-                    <p className="font-medium truncate max-w-[200px] group-hover:text-primary transition-colors">{a.maker} {a.model}</p>
+                  <td className="px-2 py-2">
+                    <p className="font-medium truncate max-w-[220px] group-hover:text-primary transition-colors">{a.maker} {a.model}</p>
                     <p className="text-[10px] text-muted-foreground truncate">{a.grade || ""}</p>
                   </td>
-                  <td className="px-2 py-1.5 hidden md:table-cell">
-                    <p className="truncate max-w-[150px]">{a.auctionHouse}</p>
+                  <td className="px-2 py-2 hidden md:table-cell">
+                    <p className="truncate max-w-[160px]">{a.auctionHouse}</p>
                     <p className="text-[10px] text-muted-foreground">{a.location}</p>
                   </td>
-                  <td className="px-2 py-1.5 hidden lg:table-cell text-muted-foreground">
+                  <td className="px-2 py-2 hidden lg:table-cell text-muted-foreground">
                     {[a.year, a.mileage, a.color].filter(Boolean).join(" · ")}
                   </td>
-                  <td className="px-2 py-1.5 text-center hidden sm:table-cell">
+                  <td className="px-2 py-2 text-center hidden sm:table-cell">
                     {a.rating && <span className="text-[10px] font-bold bg-muted px-1.5 py-0.5 rounded">{a.rating}</span>}
                   </td>
-                  <td className="px-2 py-1.5 hidden lg:table-cell text-muted-foreground text-[10px]">
+                  <td className="px-2 py-2 hidden lg:table-cell text-muted-foreground text-[10px]">
                     {a.auctionDate}
                   </td>
-                  <td className="px-3 py-1.5 text-right">
+                  <td className="px-3 py-2 text-right">
                     <span className="font-bold">{a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}</span>
                   </td>
                 </tr>
@@ -279,24 +337,24 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {(page - 1) * 40 + 1}–{Math.min(page * 40, total)} of {total.toLocaleString()}
           </span>
-          <div className="flex items-center gap-0.5">
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={page <= 1} onClick={() => goPage(page - 1)}>
-              <ChevronLeft className="h-3.5 w-3.5" />
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={page <= 1} onClick={() => goPage(page - 1)}>
+              <ChevronLeft className="h-4 w-4" />
             </Button>
             {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
               const p = page <= 3 ? i + 1 : page + i - 2;
               if (p < 1 || p > totalPages) return null;
               return (
-                <Button key={p} variant={p === page ? "default" : "ghost"} size="sm" className="h-7 w-7 p-0 text-[10px]" onClick={() => goPage(p)}>
+                <Button key={p} variant={p === page ? "default" : "ghost"} size="sm" className="h-8 w-8 p-0 text-xs" onClick={() => goPage(p)}>
                   {p}
                 </Button>
               );
             })}
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={page >= totalPages} onClick={() => goPage(page + 1)}>
-              <ChevronRight className="h-3.5 w-3.5" />
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={page >= totalPages} onClick={() => goPage(page + 1)}>
+              <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -308,17 +366,22 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
 export function CustomerAuctions(props: Props) {
   return (
     <Suspense fallback={
-      <div className="space-y-3">
-        <div className="h-7 w-32 bg-muted animate-pulse rounded" />
-        <div className="h-[30px] bg-muted animate-pulse rounded-lg" />
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
-          {Array.from({ length: 10 }).map((_, i) => (
+      <div className="space-y-4">
+        <div className="h-8 w-40 bg-muted animate-pulse rounded" />
+        <div className="flex gap-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-16 w-20 bg-muted animate-pulse rounded-lg" />
+          ))}
+        </div>
+        <div className="h-24 bg-muted animate-pulse rounded-lg" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="bg-card border rounded-lg overflow-hidden">
               <div className="aspect-[16/10] bg-muted animate-pulse" />
-              <div className="p-2 space-y-1">
-                <div className="h-3 bg-muted animate-pulse rounded w-3/4" />
-                <div className="h-2.5 bg-muted animate-pulse rounded w-1/2" />
-                <div className="h-3 bg-muted animate-pulse rounded w-1/3" />
+              <div className="p-3 space-y-2">
+                <div className="h-4 bg-muted animate-pulse rounded w-3/4" />
+                <div className="h-3 bg-muted animate-pulse rounded w-1/2" />
+                <div className="h-4 bg-muted animate-pulse rounded w-1/3" />
               </div>
             </div>
           ))}

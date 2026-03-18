@@ -24,6 +24,7 @@ auctionsRouter.get("/", async (req, res) => {
     const rating = req.query.rating as string | undefined;
     const yearFrom = req.query.yearFrom as string | undefined;
     const yearTo = req.query.yearTo as string | undefined;
+    const auctionDay = req.query.auctionDay as string | undefined;
     const includeMeta = req.query.includeMeta === "true";
 
     const where: Prisma.AuctionWhereInput = {};
@@ -40,6 +41,9 @@ auctionsRouter.get("/", async (req, res) => {
       if (yearFrom) where.year.gte = yearFrom;
       if (yearTo) where.year.lte = yearTo;
     }
+    if (auctionDay) {
+      where.auctionDateNorm = new Date(auctionDay);
+    }
     if (minPrice || maxPrice) {
       where.startPrice = {};
       if (minPrice) where.startPrice.gte = parseFloat(minPrice);
@@ -55,7 +59,7 @@ auctionsRouter.get("/", async (req, res) => {
       ];
     }
 
-    const allowedSorts = ["auctionDate", "startPrice", "maker", "firstSeen", "year", "rating"];
+    const allowedSorts = ["auctionDate", "auctionDateNorm", "startPrice", "maker", "firstSeen", "year", "rating"];
     const sortField = allowedSorts.includes(sort) ? sort : "auctionDate";
 
     const queries: Promise<unknown>[] = [
@@ -75,6 +79,7 @@ auctionsRouter.get("/", async (req, res) => {
         prisma.$queryRaw`SELECT maker, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY maker ORDER BY cnt DESC LIMIT 30`,
         prisma.$queryRaw`SELECT location, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY location ORDER BY cnt DESC LIMIT 20`,
         prisma.$queryRaw`SELECT auction_house, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY auction_house ORDER BY cnt DESC`,
+        prisma.$queryRaw`SELECT auction_date_norm::text as date, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' AND auction_date_norm IS NOT NULL AND auction_date_norm >= CURRENT_DATE GROUP BY auction_date_norm ORDER BY auction_date_norm ASC`,
       );
     }
 
@@ -95,11 +100,13 @@ auctionsRouter.get("/", async (req, res) => {
       const makers = results[3] as { maker: string; cnt: number }[];
       const locations = results[4] as { location: string; cnt: number }[];
       const houses = results[5] as { auction_house: string; cnt: number }[];
+      const days = results[6] as { date: string; cnt: number }[];
       response.sourceCounts = Object.fromEntries(sourceCounts.map(s => [s.source, s._count]));
       response.filterOptions = {
         makers: makers.map(m => ({ value: m.maker, count: m.cnt })),
         locations: locations.map(l => ({ value: l.location, count: l.cnt })),
         auctionHouses: houses.map(h => ({ value: h.auction_house, count: h.cnt })),
+        auctionDays: days.map(d => ({ date: d.date, count: d.cnt })),
       };
     }
 

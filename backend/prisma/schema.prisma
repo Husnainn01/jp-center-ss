@@ -23,6 +23,7 @@ model Auction {
   rating          String?
   startPrice      Decimal?  @map("start_price") @db.Decimal(12, 2)
   auctionDate     String    @map("auction_date")
+  auctionDateNorm DateTime? @map("auction_date_norm") @db.Date
   auctionHouse    String    @map("auction_house")
   location        String
   status          String    @default("upcoming")
