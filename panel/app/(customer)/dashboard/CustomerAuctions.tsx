@@ -75,7 +75,7 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
   const activeFilters = filterKeys.filter(k => get(k)).length;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -108,88 +108,71 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
         </div>
       </div>
 
-      {/* Filter bar */}
+      {/* Filter bar — single row */}
       {showFilters && (
-        <div className="bg-card border rounded-lg p-2.5 space-y-2">
-          <div className="flex flex-wrap gap-1.5">
-            {/* Search */}
-            <div className="relative flex-1 min-w-[180px] max-w-[240px]">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-              <input
-                ref={searchRef}
-                type="text"
-                placeholder="Search..."
-                defaultValue={get("search")}
-                onChange={e => debouncedUpdate({ search: e.target.value })}
-                className="h-[30px] w-full rounded border border-input bg-background pl-7 pr-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary"
-              />
-            </div>
-
-            <select value={get("maker")} onChange={e => update({ maker: e.target.value })} className={dd} style={{ width: 120 }}>
-              <option value="">Maker</option>
-              {filterOptions.makers.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
-            </select>
-
-            {(models.length > 0 || get("maker")) && (
-              <select value={get("model")} onChange={e => update({ model: e.target.value })} className={dd} style={{ width: 120 }} disabled={models.length === 0}>
-                <option value="">{models.length ? "Model" : "Loading..."}</option>
-                {models.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
-              </select>
-            )}
-
-            <select value={get("auctionHouse")} onChange={e => update({ auctionHouse: e.target.value })} className={dd} style={{ width: 140 }}>
-              <option value="">Auction House</option>
-              {filterOptions.auctionHouses.map(h => <option key={h.value} value={h.value}>{h.value} ({h.count})</option>)}
-            </select>
-
-            <select value={get("location")} onChange={e => update({ location: e.target.value })} className={dd} style={{ width: 120 }}>
-              <option value="">Location</option>
-              {filterOptions.locations.map(l => <option key={l.value} value={l.value}>{l.value} ({l.count})</option>)}
-            </select>
-
-            <select value={get("rating")} onChange={e => update({ rating: e.target.value })} className={dd} style={{ width: 80 }}>
-              <option value="">Rating</option>
-              <option value="S">S</option>
-              <option value="6">6+</option>
-              <option value="5">5+</option>
-              <option value="4.5">4.5+</option>
-              <option value="4">4+</option>
-              <option value="3.5">3.5+</option>
-            </select>
-
-            <select value={get("minPrice")} onChange={e => update({ minPrice: e.target.value })} className={dd} style={{ width: 100 }}>
-              <option value="">Min ¥</option>
-              <option value="10000">¥10K+</option>
-              <option value="50000">¥50K+</option>
-              <option value="100000">¥100K+</option>
-              <option value="300000">¥300K+</option>
-              <option value="500000">¥500K+</option>
-              <option value="1000000">¥1M+</option>
-            </select>
-
-            <select value={get("maxPrice")} onChange={e => update({ maxPrice: e.target.value })} className={dd} style={{ width: 100 }}>
-              <option value="">Max ¥</option>
-              <option value="50000">~¥50K</option>
-              <option value="100000">~¥100K</option>
-              <option value="300000">~¥300K</option>
-              <option value="500000">~¥500K</option>
-              <option value="1000000">~¥1M</option>
-              <option value="3000000">~¥3M</option>
-            </select>
-
-            <select value={get("sort") || "firstSeen"} onChange={e => update({ sort: e.target.value })} className={dd} style={{ width: 95 }}>
-              <option value="firstSeen">Newest</option>
-              <option value="auctionDate">By Date</option>
-              <option value="startPrice">By Price</option>
-              <option value="maker">By Maker</option>
-            </select>
-
-            {activeFilters > 0 && (
-              <button onClick={clearAll} className="h-[30px] px-2 rounded border border-destructive/30 text-destructive text-[10px] font-medium hover:bg-destructive/5 transition-colors flex items-center gap-1">
-                <X className="h-2.5 w-2.5" /> Clear
-              </button>
-            )}
+        <div className="bg-card border rounded-lg px-3 py-2 flex items-center gap-2 overflow-x-auto">
+          <div className="relative flex-shrink-0">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+            <input
+              ref={searchRef}
+              type="text"
+              placeholder="Search..."
+              defaultValue={get("search")}
+              onChange={e => debouncedUpdate({ search: e.target.value })}
+              className="h-[32px] w-[160px] rounded border border-input bg-background pl-7 pr-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary/40"
+            />
           </div>
+
+          <select value={get("maker")} onChange={e => update({ maker: e.target.value })} className={`${dd} !w-auto min-w-[100px]`}>
+            <option value="">Maker</option>
+            {filterOptions.makers.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
+          </select>
+
+          {(models.length > 0 || get("maker")) && (
+            <select value={get("model")} onChange={e => update({ model: e.target.value })} className={`${dd} !w-auto min-w-[90px]`} disabled={models.length === 0}>
+              <option value="">{models.length ? "Model" : "..."}</option>
+              {models.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
+            </select>
+          )}
+
+          <select value={get("auctionHouse")} onChange={e => update({ auctionHouse: e.target.value })} className={`${dd} !w-auto min-w-[110px]`}>
+            <option value="">Auction</option>
+            {filterOptions.auctionHouses.map(h => <option key={h.value} value={h.value}>{h.value} ({h.count})</option>)}
+          </select>
+
+          <select value={get("location")} onChange={e => update({ location: e.target.value })} className={`${dd} !w-auto min-w-[90px]`}>
+            <option value="">Location</option>
+            {filterOptions.locations.map(l => <option key={l.value} value={l.value}>{l.value} ({l.count})</option>)}
+          </select>
+
+          <select value={get("rating")} onChange={e => update({ rating: e.target.value })} className={`${dd} !w-auto min-w-[70px]`}>
+            <option value="">Rating</option>
+            <option value="S">S</option><option value="6">6+</option><option value="5">5+</option>
+            <option value="4.5">4.5+</option><option value="4">4+</option><option value="3.5">3.5+</option>
+          </select>
+
+          <select value={get("minPrice")} onChange={e => update({ minPrice: e.target.value })} className={`${dd} !w-auto min-w-[80px]`}>
+            <option value="">Min ¥</option>
+            <option value="10000">¥10K+</option><option value="50000">¥50K+</option><option value="100000">¥100K+</option>
+            <option value="300000">¥300K+</option><option value="500000">¥500K+</option><option value="1000000">¥1M+</option>
+          </select>
+
+          <select value={get("maxPrice")} onChange={e => update({ maxPrice: e.target.value })} className={`${dd} !w-auto min-w-[80px]`}>
+            <option value="">Max ¥</option>
+            <option value="50000">~¥50K</option><option value="100000">~¥100K</option><option value="300000">~¥300K</option>
+            <option value="500000">~¥500K</option><option value="1000000">~¥1M</option><option value="3000000">~¥3M</option>
+          </select>
+
+          <select value={get("sort") || "firstSeen"} onChange={e => update({ sort: e.target.value })} className={`${dd} !w-auto min-w-[80px]`}>
+            <option value="firstSeen">Newest</option><option value="auctionDate">Date</option>
+            <option value="startPrice">Price</option><option value="maker">Maker</option>
+          </select>
+
+          {activeFilters > 0 && (
+            <button onClick={clearAll} className="h-[32px] px-2.5 rounded border border-destructive/30 text-destructive text-[10px] font-medium hover:bg-destructive/5 transition-colors flex items-center gap-1 flex-shrink-0">
+              <X className="h-2.5 w-2.5" /> Clear
+            </button>
+          )}
         </div>
       )}
 
@@ -204,7 +187,7 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
         </div>
       ) : viewMode === "grid" ? (
         /* Grid */
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
           {auctions.map(a => (
             <Link key={a.id} href={`/dashboard/${a.id}`} className="group">
               <div className="bg-card border rounded-lg overflow-hidden hover:shadow-md hover:border-primary/20 transition-all duration-150">
@@ -220,19 +203,20 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
                     </span>
                   )}
                 </div>
-                <div className="p-2 space-y-0.5">
-                  <p className="text-[11px] font-semibold truncate leading-tight group-hover:text-primary transition-colors">
+                <div className="p-2.5 space-y-1">
+                  <p className="text-xs font-semibold truncate leading-tight group-hover:text-primary transition-colors">
                     {a.maker} {a.model}
                   </p>
-                  <p className="text-[9px] text-muted-foreground truncate">
+                  <p className="text-[10px] text-muted-foreground truncate">
                     {[a.year, a.mileage, a.color].filter(Boolean).join(" · ")}
                   </p>
                   <div className="flex items-center justify-between pt-0.5">
-                    <span className="text-[11px] font-bold">
+                    <span className="text-xs font-bold">
                       {a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}
                     </span>
+                    {a.rating && <span className="text-[9px] font-bold bg-muted px-1 py-0.5 rounded">{a.rating}</span>}
                   </div>
-                  <p className="text-[8px] text-muted-foreground truncate">{a.auctionHouse} · {a.auctionDate}</p>
+                  <p className="text-[9px] text-muted-foreground truncate">{a.auctionHouse} · {a.auctionDate}</p>
                 </div>
               </div>
             </Link>
@@ -294,7 +278,7 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between pt-1">
+        <div className="flex items-center justify-between">
           <span className="text-[10px] text-muted-foreground">
             {(page - 1) * 40 + 1}–{Math.min(page * 40, total)} of {total.toLocaleString()}
           </span>

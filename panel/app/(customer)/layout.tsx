@@ -54,7 +54,7 @@ export default async function CustomerLayout({
         </header>
 
         <main className="flex-1 overflow-y-auto">
-          <div className="p-4 md:p-5 max-w-[1600px]">{children}</div>
+          <div className="p-3 md:p-4 max-w-[1600px]">{children}</div>
         </main>
       </div>
     </div>
