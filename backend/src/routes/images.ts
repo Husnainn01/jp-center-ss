@@ -25,7 +25,7 @@ console.log(`[images] S3 secret key: ${(process.env.S3_SECRET_KEY || "").length}
 imagesRouter.get("/:prefix/:filename", async (req, res) => {
   const { prefix, filename } = req.params;
 
-  if (!["ninja-images", "taa-images"].includes(prefix)) {
+  if (!["ninja-images", "taa-images", "iauc-images"].includes(prefix)) {
     res.status(404).send("Not found");
     return;
   }
