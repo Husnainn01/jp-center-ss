@@ -1,6 +1,5 @@
-"""TAA scraper: search → paginate → open detail popups (parallel) → extract data + upload images.
-Optimized: parallel popup extraction (3 concurrent), skip existing vehicles.
-Chunk-based: saves each page of results to DB immediately."""
+"""TAA scraper: search → paginate → open each detail popup (sequential) → extract data + upload images.
+Sequential popup extraction for reliability."""
 
 import asyncio
 import os
@@ -11,18 +10,15 @@ from playwright.async_api import Page, BrowserContext
 from db import upsert_auctions, get_existing_item_ids
 from storage import upload_image
 
-MAX_CONCURRENT_POPUPS = 3
-
 
 async def taa_search_and_extract(context: BrowserContext) -> list[str]:
     """Full TAA scrape flow. Returns list of scraped item_ids."""
     page = context.pages[0] if context.pages else await context.new_page()
 
-    # Load existing vehicle IDs to skip re-scraping
     existing_ids = get_existing_item_ids("taa")
     print(f"  [taa] {len(existing_ids)} existing vehicles in DB (will skip)")
 
-    # Navigate to search via nav image
+    # Navigate to search
     print("  [taa] Navigating to search...")
     await page.click('img[name="navi01"]')
     await page.wait_for_load_state("networkidle", timeout=30000)
@@ -32,7 +28,7 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
         print(f"  [taa] Failed to reach search page: {page.url}")
         return []
 
-    # Check ALL day checkboxes (Mon-Sat)
+    # Check ALL day checkboxes
     await page.evaluate("""() => {
         document.querySelectorAll('input[name="checkHallYobi"]').forEach(cb => {
             if (!cb.checked) cb.click();
@@ -46,17 +42,21 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
     # Select all makers
     await page.evaluate("() => document.querySelectorAll('input[name=\"carMakerArr\"]').forEach(cb => { if(!cb.checked) cb.click(); })")
 
-    # Wait for models to load after maker selection
+    # Wait for models to load
     model_count = 0
-    for i in range(10):
+    for i in range(15):
         await asyncio.sleep(2)
         model_count = await page.evaluate("() => document.querySelectorAll('input[name=\"syasyu2\"]').length")
         if model_count > 0:
             break
-        print(f"  [taa] Waiting for models to load... ({i+1})")
+        print(f"  [taa] Waiting for models... ({i+1})")
 
     maker_count = await page.evaluate("() => document.querySelectorAll('input[name=\"carMakerArr\"]:checked').length")
     print(f"  [taa] Selected {maker_count} makers, {model_count} models available")
+
+    if model_count == 0:
+        print("  [taa] No models loaded, aborting")
+        return []
 
     # Select all models
     await page.evaluate("() => document.querySelectorAll('input[name=\"syasyu2\"]').forEach(cb => { if(!cb.checked) cb.click(); })")
@@ -79,26 +79,34 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
         print(f"  [taa] Search failed: {page.url}")
         return []
 
-    # Get total count
+    # Get total count — try both English and Japanese patterns
     total_text = await page.evaluate("""() => {
-        const m = document.body.innerText.match(/(\\d[\\d,]*)\\s*Total/);
-        return m ? m[1].replace(/,/g, '') : '0';
+        const text = document.body.innerText;
+        let m = text.match(/(\\d[\\d,]*)\\s*Total/);
+        if (m) return m[1].replace(/,/g, '');
+        m = text.match(/(\\d[\\d,]*)\\s*件/);
+        if (m) return m[1].replace(/,/g, '');
+        // Try finding any large number near "Total" or "件"
+        m = text.match(/Total[:\\s]*(\\d[\\d,]*)/i);
+        if (m) return m[1].replace(/,/g, '');
+        return '0';
     }""")
     total = int(total_text)
     print(f"  [taa] Total results: {total}")
 
     if total == 0:
+        # Debug: check what's on the page
+        body_snippet = await page.evaluate("() => document.body.innerText.substring(0, 500)")
+        print(f"  [taa] Page content: {body_snippet[:200]}")
         return []
 
-    # Paginate and extract
+    # Paginate and extract — SEQUENTIAL
     all_ids = []
     page_num = 0
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_POPUPS)
 
     while True:
         page_num += 1
 
-        # Get vehicle count on this page
         vehicle_count = await page.evaluate("""() => {
             const links = document.querySelectorAll('a[href*="popDetail"]');
             const ids = new Set();
@@ -112,15 +120,14 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
         if vehicle_count == 0:
             break
 
-        print(f"  [taa] Page {page_num}: {vehicle_count} vehicles on page")
+        print(f"  [taa] Page {page_num}: {vehicle_count} vehicles")
 
-        # Extract vehicles in parallel using popups
-        async def extract_one(idx):
-            async with semaphore:
-                return await _extract_vehicle_detail(context, page, idx, existing_ids)
-
-        results = await asyncio.gather(*[extract_one(idx) for idx in range(1, vehicle_count + 1)])
-        vehicles = [v for v in results if v]
+        # Extract SEQUENTIALLY — one popup at a time
+        vehicles = []
+        for idx in range(1, vehicle_count + 1):
+            v = await _extract_vehicle_safe(context, page, idx, existing_ids)
+            if v:
+                vehicles.append(v)
 
         if vehicles:
             result = upsert_auctions(vehicles)
@@ -128,16 +135,11 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
             existing_ids.update(v["item_id"] for v in vehicles)
             pct = len(all_ids) / total * 100 if total else 0
             print(f"  [taa] Page {page_num}: {len(vehicles)} → DB (new:{result['new']}) | {len(all_ids)}/{total} ({pct:.1f}%)")
-        else:
-            # Count skipped
-            skipped = vehicle_count - len(vehicles)
-            if skipped > 0:
-                print(f"  [taa] Page {page_num}: {skipped} skipped (existing)")
 
         if len(all_ids) >= total:
             break
 
-        # Click next page
+        # Next page
         has_next = await page.evaluate("""() => {
             const links = document.querySelectorAll('a');
             for (const a of links) {
@@ -150,28 +152,54 @@ async def taa_search_and_extract(context: BrowserContext) -> list[str]:
         }""")
 
         if not has_next:
-            print("  [taa] No next page")
             break
 
         await page.wait_for_load_state("networkidle", timeout=30000)
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
 
     print(f"  [taa] Done: {len(all_ids)} vehicles across {page_num} pages")
     return all_ids
+
+
+async def _close_stale_popups(context: BrowserContext, list_page: Page):
+    """Close any open popups except the list page."""
+    for pg in context.pages:
+        if pg != list_page:
+            try:
+                await pg.close()
+            except:
+                pass
+    await asyncio.sleep(0.5)
+
+
+async def _extract_vehicle_safe(context: BrowserContext, list_page: Page, idx: int, existing_ids: set) -> dict | None:
+    """Extract vehicle with retry. Sequential — one at a time."""
+    for attempt in range(2):
+        try:
+            return await _extract_vehicle_detail(context, list_page, idx, existing_ids)
+        except Exception as e:
+            if attempt == 0:
+                print(f"  [taa] Popup {idx} failed, retrying: {e}")
+                await _close_stale_popups(context, list_page)
+                await asyncio.sleep(1)
+            else:
+                print(f"  [taa] Popup {idx} failed after retry: {e}")
+                await _close_stale_popups(context, list_page)
+                return None
 
 
 async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx: int, existing_ids: set) -> dict | None:
     """Open vehicle detail popup, extract data, upload images, close popup."""
     popup = None
     try:
-        async with context.expect_page(timeout=10000) as popup_info:
+        async with context.expect_page(timeout=15000) as popup_info:
             await list_page.evaluate(f"() => popDetail({idx})")
 
         popup = await popup_info.value
         await popup.wait_for_load_state("networkidle", timeout=15000)
         await asyncio.sleep(1)
 
-        # Extract data + image URLs from the popup
+        # Extract data + image URLs
         data = await popup.evaluate("""() => {
             const allText = document.body.innerText;
 
@@ -222,16 +250,17 @@ async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx:
             await popup.close()
             return None
 
-        # Build item_id early to check if we can skip
+        # Parse data and check if existing
         raw = data.get("raw_text", "")
         vehicle = _parse_taa_detail(raw, data)
         item_id = vehicle["item_id"]
 
         if item_id in existing_ids:
             await popup.close()
-            return None  # Skip — already in DB
+            await asyncio.sleep(0.3)
+            return None
 
-        # Upload images in parallel
+        # Upload images — sequential within popup for reliability
         async def download_and_upload(url: str) -> str | None:
             try:
                 result = await popup.evaluate("""async (url) => {
@@ -256,20 +285,21 @@ async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx:
             except:
                 return None
 
-        # Parallel image uploads
-        car_urls = data.get("car_image_urls", [])[:10]
-        car_tasks = [download_and_upload(url) for url in car_urls]
-        car_results = await asyncio.gather(*car_tasks) if car_tasks else []
-        car_images = [r for r in car_results if r]
+        car_images = []
+        for url in data.get("car_image_urls", [])[:10]:
+            local = await download_and_upload(url)
+            if local and local not in car_images:
+                car_images.append(local)
 
         exhibit_sheet = None
         for url in data.get("sheet_urls", []):
-            path = await download_and_upload(url)
-            if path:
-                exhibit_sheet = path
+            local = await download_and_upload(url)
+            if local:
+                exhibit_sheet = local
                 break
 
         await popup.close()
+        await asyncio.sleep(0.3)
 
         vehicle["images"] = car_images
         vehicle["image_url"] = car_images[0] if car_images else None
@@ -277,24 +307,16 @@ async def _extract_vehicle_detail(context: BrowserContext, list_page: Page, idx:
         return vehicle
 
     except Exception as e:
-        # Close any lingering popups
-        if popup:
+        if popup and not popup.is_closed():
             try:
                 await popup.close()
             except:
                 pass
-        else:
-            for pg in context.pages:
-                if "carDetail" in pg.url:
-                    try:
-                        await pg.close()
-                    except:
-                        pass
-        return None
+        raise
 
 
 def _parse_taa_detail(raw: str, data: dict) -> dict:
-    """Parse TAA detail popup text (English version) into structured vehicle data."""
+    """Parse TAA detail popup text (English version)."""
 
     lines = [l.strip() for l in raw.split("\n") if l.strip()]
 
@@ -302,12 +324,6 @@ def _parse_taa_detail(raw: str, data: dict) -> dict:
     parts = title.split() if title else []
     maker = parts[0] if len(parts) > 0 else ""
     model = " ".join(parts[1:]) if len(parts) > 1 else title
-
-    def find_after(keyword):
-        for i, line in enumerate(lines):
-            if keyword.lower() in line.lower() and i + 1 < len(lines):
-                return lines[i + 1]
-        return None
 
     date_str = ""
     hall = ""
@@ -341,11 +357,6 @@ def _parse_taa_detail(raw: str, data: dict) -> dict:
     color_match = re.search(r'(?:Color|Colour|Body color)[:\s]*([^\n]+)', raw, re.IGNORECASE)
     if color_match:
         color = color_match.group(1).strip()
-    else:
-        for line in lines:
-            if re.match(r'^(White|Black|Silver|Red|Blue|Green|Pearl|Gold|Gray|Grey|Beige|Brown)', line, re.IGNORECASE):
-                color = line
-                break
 
     score_match = re.search(r'(?:Score|Rating|Evaluation)[:\s]*([^\n]+)', raw, re.IGNORECASE)
     if score_match:
