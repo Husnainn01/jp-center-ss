@@ -27,7 +27,7 @@ function BidForm({ auctionId, onDone }: { auctionId: number; onDone: (refCode?: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           auctionId,
-          maxBidPrice: maxBid || undefined,
+          maxBidPrice: maxBid ? maxBid.replace(/[^0-9]/g, "") : undefined,
           note: note || undefined,
         }),
       });

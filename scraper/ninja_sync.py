@@ -9,7 +9,7 @@ from ninja_scraper import ninja_search_and_extract
 from db import log_sync, get_site_credentials, is_site_enabled
 
 
-async def run_ninja_sync():
+async def run_ninja_sync(makers: list[str] | None = None):
     if not is_site_enabled("uss"):
         print("[ninja-sync] USS/NINJA scraper is DISABLED. Skipping.")
         return
@@ -43,7 +43,7 @@ async def run_ninja_sync():
                 return
 
             print("[ninja-sync] Scraping...")
-            scraped_ids = await ninja_search_and_extract(context)
+            scraped_ids = await ninja_search_and_extract(context, makers=makers)
 
             total = len(scraped_ids)
             duration_ms = int((time.time() - start) * 1000)

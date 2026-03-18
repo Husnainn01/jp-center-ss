@@ -8,30 +8,33 @@ from playwright.async_api import Page, BrowserContext
 from db import upsert_auctions, get_existing_item_ids
 from storage import upload_image
 
-MAKERS = [
+ALL_MAKERS = [
     "TOYOTA", "LEXUS", "NISSAN", "HONDA", "MAZDA", "MITSUBISHI",
-    "SUBARU", "DAIHATSU", "SUZUKI", "MERCEDES BENZ", "BMW", "AUDI",
-    "VOLKSWAGEN", "PORSCHE",
+    "SUBARU", "DAIHATSU", "SUZUKI", "ISUZU", "HINO",
+    "MERCEDES BENZ", "BMW", "AUDI", "VOLKSWAGEN", "PORSCHE",
 ]
 
 # Max pages per maker to avoid getting stuck on one maker (e.g. TOYOTA with 20K vehicles)
 MAX_PAGES_PER_MAKER = 20
 
 
-async def ninja_search_and_extract(context: BrowserContext) -> list[str]:
+async def ninja_search_and_extract(context: BrowserContext, makers: list[str] | None = None) -> list[str]:
     page = context.pages[0] if context.pages else await context.new_page()
     all_ids = []
+
+    makers = makers or ALL_MAKERS
 
     # Capture the search URL for fresh navigation
     search_url = page.url
     if "searchcondition" not in search_url:
         search_url = "https://www.ninja-cartrade.jp/ninja/buy/searchcondition"
     print(f"  [ninja] Search URL: {search_url[:60]}...")
+    print(f"  [ninja] Makers to scrape: {', '.join(makers)}")
 
     existing_ids = get_existing_item_ids("uss")
     print(f"  [ninja] {len(existing_ids)} existing vehicles in DB (will skip)")
 
-    for maker in MAKERS:
+    for maker in makers:
         print(f"  [ninja] Scraping {maker}...")
         try:
             ids = await _scrape_maker(page, context, maker, existing_ids, search_url)
