@@ -345,7 +345,7 @@ def _parse_detail_text(text: str, maker: str, site: str, bid_no: str, times: str
 
     return {
         "item_id": item_id,
-        "lot_number": f"No.{bid_no}",
+        "lot_number": bid_no,
         "maker": maker,
         "model": model,
         "grade": grade or None,

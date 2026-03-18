@@ -1,6 +1,7 @@
 """Database connection and operations. Optimized with batch upserts."""
 
 import os
+import re
 import json
 from decimal import Decimal
 from sqlalchemy import create_engine, text
@@ -62,7 +63,7 @@ def upsert_auctions(vehicles: list[dict]) -> dict:
                     """),
                     {
                         "item_id": item_id,
-                        "lot_number": v.get("lot_number", ""),
+                        "lot_number": re.sub(r'[^0-9]', '', str(v.get("lot_number", ""))),
                         "maker": v.get("maker", "").strip(),
                         "model": v.get("model", "").strip(),
                         "grade": v.get("grade"),
