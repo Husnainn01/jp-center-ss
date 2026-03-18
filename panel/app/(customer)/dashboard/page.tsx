@@ -37,8 +37,8 @@ export default async function CustomerDashboard({ searchParams }: Props) {
   for (const key of passthrough) {
     if (sp[key]) params.set(key, sp[key]!);
   }
-  if (!sp.sort) params.set("sort", "auctionDate");
-  if (!sp.order) params.set("order", "asc");
+  if (!sp.sort) params.set("sort", "firstSeen");
+  if (!sp.order) params.set("order", "desc");
 
   const data = await backendFetch<AuctionsResponse>(`/api/auctions?${params}`);
 
