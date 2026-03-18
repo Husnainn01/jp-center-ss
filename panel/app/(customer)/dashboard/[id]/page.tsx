@@ -103,10 +103,12 @@ export default async function CustomerVehicleDetail({ params }: Props) {
         )}
       </div>
 
-      {/* ──── Hero: Car Photos ──── */}
+      {/* ──── Car Photos ──── */}
       <Card className="overflow-hidden">
-        <CardContent className="p-4">
-          <ImageCarousel images={carImages} alt={`${auction.maker} ${auction.model}`} />
+        <CardContent className="p-3">
+          <div className="max-w-[600px] mx-auto">
+            <ImageCarousel images={carImages} alt={`${auction.maker} ${auction.model}`} />
+          </div>
         </CardContent>
       </Card>
 
