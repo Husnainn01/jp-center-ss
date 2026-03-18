@@ -1,13 +1,27 @@
-"""USS/NINJA sync: login → scrape → DB → cleanup expired."""
+"""USS/NINJA sync: login → scrape → DB → cleanup expired → invalidate cache."""
 
 import time
 import asyncio
 import os
+import urllib.request
 from playwright.async_api import async_playwright
 from ninja_login import ninja_login
 from ninja_scraper import ninja_search_and_extract
 from db import log_sync, get_site_credentials, is_site_enabled
 from cleanup import run_cleanup
+
+BACKEND_URL = os.getenv("BACKEND_URL", "https://skillful-grace-production-377c.up.railway.app")
+
+
+def invalidate_cache():
+    """Tell backend to clear its in-memory cache after sync."""
+    try:
+        req = urllib.request.Request(f"{BACKEND_URL}/api/cache/invalidate", method="POST",
+                                     data=b"", headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=5)
+        print("[ninja-sync] Cache invalidated")
+    except Exception as e:
+        print(f"[ninja-sync] Cache invalidation failed (non-fatal): {e}")
 
 
 async def run_ninja_sync(makers: list[str] | None = None):
@@ -58,6 +72,7 @@ async def run_ninja_sync(makers: list[str] | None = None):
 
             duration_ms = int((time.time() - start) * 1000)
             log_sync(0, 0, 0, total, duration_ms, source="ninja")
+            invalidate_cache()
             print(f"[ninja-sync] Complete in {duration_ms/1000:.1f}s — {total} vehicles")
 
         except Exception as e:

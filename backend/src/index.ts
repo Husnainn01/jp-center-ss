@@ -15,6 +15,7 @@ import { auctionSitesRouter } from "./routes/auction-sites.js";
 import { authSyncRouter } from "./routes/auth-sync.js";
 import { scraperStatusRouter } from "./routes/scraper-status.js";
 import { imagesRouter } from "./routes/images.js";
+import { cacheRouter } from "./routes/cache.js";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "4000");
@@ -41,6 +42,7 @@ app.use("/api/auction-sites", auctionSitesRouter);
 app.use("/api/auth", authSyncRouter);
 app.use("/api/scraper-status", scraperStatusRouter);
 app.use("/s3", imagesRouter);
+app.use("/api/cache", cacheRouter);
 
 // Health check
 app.get("/health", (_req, res) => {

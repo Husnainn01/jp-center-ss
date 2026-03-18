@@ -37,6 +37,18 @@ model Auction {
   firstSeen       DateTime  @default(now()) @map("first_seen")
   lastUpdated     DateTime  @updatedAt @map("last_updated")
 
+  // Performance indexes for filtering, sorting, and aggregation
+  @@index([status])
+  @@index([source])
+  @@index([status, source])
+  @@index([status, maker])
+  @@index([status, auctionDateNorm])
+  @@index([status, location])
+  @@index([status, auctionHouse])
+  @@index([auctionDateNorm])
+  @@index([maker])
+  @@index([firstSeen])
+  @@index([startPrice])
   @@map("auctions")
 }
 

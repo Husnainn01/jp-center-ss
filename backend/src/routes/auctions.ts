@@ -2,8 +2,11 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { serializeAuction } from "../lib/serialize.js";
 import type { Prisma } from "../generated/prisma/client.js";
+import { cached } from "../lib/cache.js";
 
 export const auctionsRouter = Router();
+
+const META_TTL = 2 * 60 * 1000; // 2 min — filter options rarely change
 
 // GET /api/auctions — paginated list with filters
 auctionsRouter.get("/", async (req, res) => {
@@ -64,7 +67,8 @@ auctionsRouter.get("/", async (req, res) => {
     const allowedSorts = ["auctionDate", "auctionDateNorm", "startPrice", "maker", "firstSeen", "year", "rating"];
     const sortField = allowedSorts.includes(sort) ? sort : "auctionDate";
 
-    const queries: Promise<unknown>[] = [
+    // Main data query — not cached (pagination + filters change constantly)
+    const [auctions, total] = await Promise.all([
       prisma.auction.findMany({
         where,
         orderBy: { [sortField]: order } as Prisma.AuctionOrderByWithRelationInput,
@@ -72,22 +76,7 @@ auctionsRouter.get("/", async (req, res) => {
         take: pageSize,
       }),
       prisma.auction.count({ where }),
-    ];
-
-    // Optionally include source counts + filter options for server component use
-    if (includeMeta) {
-      queries.push(
-        prisma.auction.groupBy({ by: ["source"], where: { status: "upcoming" }, _count: true }),
-        prisma.$queryRaw`SELECT maker, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY maker ORDER BY cnt DESC LIMIT 30`,
-        prisma.$queryRaw`SELECT location, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY location ORDER BY cnt DESC LIMIT 20`,
-        prisma.$queryRaw`SELECT auction_house, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY auction_house ORDER BY cnt DESC`,
-        prisma.$queryRaw`SELECT auction_date_norm::text as date, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' AND auction_date_norm IS NOT NULL AND auction_date_norm >= (NOW() AT TIME ZONE 'Asia/Tokyo')::date GROUP BY auction_date_norm ORDER BY auction_date_norm ASC`,
-      );
-    }
-
-    const results = await Promise.all(queries);
-    const auctions = results[0] as Awaited<ReturnType<typeof prisma.auction.findMany>>;
-    const total = results[1] as number;
+    ]);
 
     const response: Record<string, unknown> = {
       auctions: auctions.map(serializeAuction),
@@ -97,19 +86,29 @@ auctionsRouter.get("/", async (req, res) => {
       totalPages: Math.ceil(total / pageSize),
     };
 
+    // Meta/filter options — cached (same for all users, only changes on scraper sync)
     if (includeMeta) {
-      const sourceCounts = results[2] as { source: string; _count: number }[];
-      const makers = results[3] as { maker: string; cnt: number }[];
-      const locations = results[4] as { location: string; cnt: number }[];
-      const houses = results[5] as { auction_house: string; cnt: number }[];
-      const days = results[6] as { date: string; cnt: number }[];
-      response.sourceCounts = Object.fromEntries(sourceCounts.map(s => [s.source, s._count]));
-      response.filterOptions = {
-        makers: makers.map(m => ({ value: m.maker, count: m.cnt })),
-        locations: locations.map(l => ({ value: l.location, count: l.cnt })),
-        auctionHouses: houses.map(h => ({ value: h.auction_house, count: h.cnt })),
-        auctionDays: days.map(d => ({ date: d.date, count: d.cnt })),
-      };
+      const meta = await cached("auctions:meta", async () => {
+        const [sourceCounts, makers, locations, houses, days] = await Promise.all([
+          prisma.auction.groupBy({ by: ["source"], where: { status: "upcoming" }, _count: true }),
+          prisma.$queryRaw<{ maker: string; cnt: number }[]>`SELECT maker, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY maker ORDER BY cnt DESC LIMIT 30`,
+          prisma.$queryRaw<{ location: string; cnt: number }[]>`SELECT location, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY location ORDER BY cnt DESC LIMIT 20`,
+          prisma.$queryRaw<{ auction_house: string; cnt: number }[]>`SELECT auction_house, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY auction_house ORDER BY cnt DESC`,
+          prisma.$queryRaw<{ date: string; cnt: number }[]>`SELECT auction_date_norm::text as date, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' AND auction_date_norm IS NOT NULL AND auction_date_norm >= (NOW() AT TIME ZONE 'Asia/Tokyo')::date GROUP BY auction_date_norm ORDER BY auction_date_norm ASC`,
+        ]);
+        return {
+          sourceCounts: Object.fromEntries(sourceCounts.map(s => [s.source, s._count])),
+          filterOptions: {
+            makers: makers.map(m => ({ value: m.maker, count: m.cnt })),
+            locations: locations.map(l => ({ value: l.location, count: l.cnt })),
+            auctionHouses: houses.map(h => ({ value: h.auction_house, count: h.cnt })),
+            auctionDays: days.map(d => ({ date: d.date, count: d.cnt })),
+          },
+        };
+      }, META_TTL);
+
+      response.sourceCounts = meta.sourceCounts;
+      response.filterOptions = meta.filterOptions;
     }
 
     res.json(response);
