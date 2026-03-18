@@ -1,9 +1,11 @@
-"""USS/NINJA scraper: maker-by-maker, fresh page load per maker.
-Optimized: skip existing vehicles, parallel image uploads."""
+"""USS/NINJA scraper: maker-by-maker, JS navigation (no page.goto).
+Optimized: skip existing vehicles, parallel image uploads.
+Limits: 500 vehicles & 30 min per maker, smallest makers first."""
 
 import asyncio
 import base64
 import re
+import time
 from playwright.async_api import Page, BrowserContext
 from db import upsert_auctions, get_existing_item_ids
 from storage import upload_image
@@ -21,8 +23,46 @@ BRAND_CODES = {
     "AUDI": "46", "VOLKSWAGEN": "47", "PORSCHE": "49",
 }
 
-# Max pages per maker to avoid getting stuck on one maker (e.g. TOYOTA with 20K vehicles)
+# Limits per maker to ensure all makers get scraped each cycle
 MAX_PAGES_PER_MAKER = 20
+MAX_VEHICLES_PER_MAKER = 500
+MAX_TIME_PER_MAKER = 1800  # 30 minutes in seconds
+
+
+async def _select_maker(page: Page, brand_code: str):
+    """Navigate to searchcondition (if needed) then select maker via seniBrand."""
+    # If not on searchcondition, go back first (seniToSearchcondition is available on all NINJA pages)
+    if "searchcondition" not in page.url:
+        try:
+            await page.evaluate("() => seniToSearchcondition()")
+            await page.wait_for_load_state("networkidle", timeout=30000)
+            await asyncio.sleep(3)
+        except:
+            # Fallback: browser back
+            await page.go_back()
+            await page.wait_for_load_state("networkidle", timeout=30000)
+            await asyncio.sleep(3)
+
+    await page.evaluate(f"() => seniBrand('{brand_code}')")
+    await page.wait_for_load_state("networkidle", timeout=30000)
+    await asyncio.sleep(3)
+
+
+async def _get_maker_vehicle_count(page: Page, brand_code: str) -> int:
+    """Quick check: select maker and return total vehicle count."""
+    await _select_maker(page, brand_code)
+    total = await page.evaluate("""() => {
+        let total = 0;
+        document.querySelectorAll('a').forEach(a => {
+            const onclick = a.getAttribute('onclick') || '';
+            if (onclick.match(/makerListChoiceCarCat/)) {
+                const m = a.textContent.trim().match(/\\((\\d+)\\)/);
+                if (m) total += parseInt(m[1]);
+            }
+        });
+        return total;
+    }""")
+    return total
 
 
 async def ninja_search_and_extract(context: BrowserContext, makers: list[str] | None = None) -> list[str]:
@@ -31,56 +71,60 @@ async def ninja_search_and_extract(context: BrowserContext, makers: list[str] | 
 
     makers = makers or ALL_MAKERS
 
-    # Capture the search URL for fresh navigation
-    search_url = page.url
-    if "searchcondition" not in search_url:
-        search_url = "https://www.ninja-cartrade.jp/ninja/buy/searchcondition.action"
-    print(f"  [ninja] Search URL: {search_url[:60]}...")
+    print(f"  [ninja] Current URL: {page.url[:60]}...")
     print(f"  [ninja] Makers to scrape: {', '.join(makers)}")
+    print(f"  [ninja] Limits: {MAX_VEHICLES_PER_MAKER} vehicles, {MAX_TIME_PER_MAKER//60} min per maker")
 
     existing_ids = get_existing_item_ids("uss")
     print(f"  [ninja] {len(existing_ids)} existing vehicles in DB (will skip)")
 
+    # Pre-scan: get vehicle counts for all makers and sort smallest first
+    print(f"  [ninja] Pre-scanning maker sizes...")
+    maker_counts = []
     for maker in makers:
+        brand_code = BRAND_CODES.get(maker)
+        if not brand_code:
+            continue
+        try:
+            count = await _get_maker_vehicle_count(page, brand_code)
+            maker_counts.append((maker, count))
+            print(f"  [ninja]   {maker}: {count} vehicles")
+        except Exception as e:
+            maker_counts.append((maker, 0))
+            print(f"  [ninja]   {maker}: failed to count ({e})")
+
+    # Sort smallest first so small makers finish quickly
+    maker_counts.sort(key=lambda x: x[1])
+    sorted_makers = [m for m, _ in maker_counts]
+    print(f"  [ninja] Scrape order (smallest first): {', '.join(sorted_makers)}")
+
+    for maker in sorted_makers:
         print(f"  [ninja] Scraping {maker}...")
         try:
-            ids = await _scrape_maker(page, context, maker, existing_ids, search_url)
+            ids = await _scrape_maker(page, context, maker, existing_ids)
             all_ids.extend(ids)
             print(f"  [ninja] {maker}: {len(ids)} vehicles total")
         except Exception as e:
             print(f"  [ninja] {maker} failed: {e}")
-            # Fresh page load to recover
-            try:
-                await page.goto(search_url, wait_until="networkidle", timeout=30000)
-                await asyncio.sleep(3)
-            except:
-                pass
 
     print(f"  [ninja] Total: {len(all_ids)} vehicles")
     return all_ids
 
 
-async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existing_ids: set, search_url: str) -> list[str]:
-    """Scrape vehicles for a maker. Fresh page load to guarantee clean state."""
+async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existing_ids: set) -> list[str]:
+    """Scrape vehicles for a maker. Uses JS navigation to preserve session.
+    Enforces MAX_VEHICLES_PER_MAKER and MAX_TIME_PER_MAKER limits."""
 
-    # Fresh page load — guarantees clean JS state
-    try:
-        await page.goto(search_url, wait_until="networkidle", timeout=30000)
-    except:
-        pass
-    await asyncio.sleep(3)
+    maker_start = time.time()
 
-    # Select maker via brand code
     brand_code = BRAND_CODES.get(maker)
     if not brand_code:
         print(f"  [ninja] {maker}: no brand code, skipping")
         return []
 
-    await page.evaluate(f"() => makerListChoiceBrand('{brand_code}')")
-    await page.wait_for_load_state("networkidle", timeout=30000)
-    await asyncio.sleep(3)
+    await _select_maker(page, brand_code)
 
-    # Get models
+    # Now on makersearch.action — get models via makerListChoiceCarCat links
     models = await page.evaluate("""() => {
         const models = [];
         document.querySelectorAll('a').forEach(a => {
@@ -122,14 +166,13 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
 
             body = await page.inner_text("body")
             if "more than 1,000" not in body.lower() and "1,000items" not in body.lower():
-                return await _paginate_results(page, context, maker, existing_ids)
+                return await _paginate_results(page, context, maker, existing_ids, maker_start)
         except Exception as e:
             print(f"  [ninja] {maker} allSearch failed: {e}")
 
     # >1000: search model by model, but limit to top models by count
-    # Sort models by count descending, take top ones
     models.sort(key=lambda m: m["count"], reverse=True)
-    top_models = models[:30]  # Max 30 models per maker to avoid spending hours on one maker
+    top_models = models[:30]
     print(f"  [ninja] {maker}: searching top {len(top_models)} models (of {len(models)})...")
 
     all_ids = []
@@ -137,39 +180,36 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
         if model["count"] == 0:
             continue
 
+        # Check limits before starting next model
+        elapsed = time.time() - maker_start
+        if elapsed >= MAX_TIME_PER_MAKER:
+            print(f"  [ninja] {maker}: time limit reached ({elapsed/60:.1f} min), moving on")
+            break
+        if len(all_ids) >= MAX_VEHICLES_PER_MAKER:
+            print(f"  [ninja] {maker}: vehicle limit reached ({len(all_ids)}/{MAX_VEHICLES_PER_MAKER}), moving on")
+            break
+
         try:
-            ids = await _scrape_single_model(page, context, maker, model, existing_ids, search_url)
+            ids = await _scrape_single_model(page, context, maker, model, existing_ids, maker_start)
             all_ids.extend(ids)
             if ids:
                 print(f"  [ninja] {maker} > {model['name']}: {len(ids)} vehicles")
         except Exception as e:
             print(f"  [ninja] {maker} > {model['name']} failed: {e}")
-            try:
-                await page.goto(search_url, wait_until="networkidle", timeout=30000)
-                await asyncio.sleep(3)
-            except:
-                pass
 
+    elapsed = time.time() - maker_start
+    print(f"  [ninja] {maker}: done in {elapsed/60:.1f} min")
     return all_ids
 
 
-async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, model: dict, existing_ids: set, search_url: str) -> list[str]:
-    """Search for a single maker+model. Fresh page load each time."""
-    # Fresh page load
-    try:
-        await page.goto(search_url, wait_until="networkidle", timeout=30000)
-    except:
-        pass
-    await asyncio.sleep(2)
-
-    # Select maker via brand code
+async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, model: dict, existing_ids: set, maker_start: float) -> list[str]:
+    """Search for a single maker+model. Uses JS navigation."""
     brand_code = BRAND_CODES.get(maker)
     if not brand_code:
         return []
 
-    await page.evaluate(f"() => makerListChoiceBrand('{brand_code}')")
-    await page.wait_for_load_state("networkidle", timeout=30000)
-    await asyncio.sleep(3)
+    # Re-select maker to get back to model list
+    await _select_maker(page, brand_code)
 
     # Select all body types
     await page.evaluate("""() => {
@@ -190,15 +230,23 @@ async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, 
         print(f"  [ninja] {maker} > {model['name']}: >1000, skipping")
         return []
 
-    return await _paginate_results(page, context, maker, existing_ids)
+    return await _paginate_results(page, context, maker, existing_ids, maker_start)
 
 
-async def _paginate_results(page: Page, context: BrowserContext, maker: str, existing_ids: set) -> list[str]:
-    """Paginate through results. Limited to MAX_PAGES_PER_MAKER."""
+async def _paginate_results(page: Page, context: BrowserContext, maker: str, existing_ids: set, maker_start: float) -> list[str]:
+    """Paginate through results. Enforces page, vehicle, and time limits."""
     all_ids = []
     page_num = 0
 
     while page_num < MAX_PAGES_PER_MAKER:
+        # Check time and vehicle limits
+        if time.time() - maker_start >= MAX_TIME_PER_MAKER:
+            print(f"  [ninja] {maker}: time limit reached, stopping pagination")
+            break
+        if len(all_ids) >= MAX_VEHICLES_PER_MAKER:
+            print(f"  [ninja] {maker}: vehicle limit reached ({len(all_ids)}/{MAX_VEHICLES_PER_MAKER}), stopping pagination")
+            break
+
         page_num += 1
 
         vehicle_params = await page.evaluate("""() => {

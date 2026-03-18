@@ -44,33 +44,9 @@ services:
       - postgres
     restart: unless-stopped
 
-  scraper-ninja-jp-popular:
+  scraper-ninja:
     build: ./scraper
-    command: python run_ninja_jp_popular.py
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/jp_auction
-      NINJA_INTERVAL_MINUTES: 30
-      HEADLESS: "true"
-      <<: *s3-env
-    depends_on:
-      - postgres
-    restart: unless-stopped
-
-  scraper-ninja-jp-other:
-    build: ./scraper
-    command: python run_ninja_jp_other.py
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/jp_auction
-      NINJA_INTERVAL_MINUTES: 30
-      HEADLESS: "true"
-      <<: *s3-env
-    depends_on:
-      - postgres
-    restart: unless-stopped
-
-  scraper-ninja-imported:
-    build: ./scraper
-    command: python run_ninja_imported.py
+    command: python run_ninja.py
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/jp_auction
       NINJA_INTERVAL_MINUTES: 30
