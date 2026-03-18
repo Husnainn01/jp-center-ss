@@ -1,61 +1,47 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
   SheetContent,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { Car, List, User, Gavel, Menu } from "lucide-react";
+import { Car, List, User, Menu, ChevronRight } from "lucide-react";
 
 const navItems = [
-  { href: "/dashboard", label: "Upcoming Cars", icon: Car, badge: true },
+  { href: "/dashboard", label: "Auction Vehicles", icon: Car },
   { href: "/lists", label: "My Lists", icon: List },
   { href: "/profile", label: "Profile", icon: User },
 ];
 
-interface CustomerNavProps {
-  vehicleCount?: number;
-}
-
-function NavItems({ vehicleCount, onNavigate }: CustomerNavProps & { onNavigate?: () => void }) {
+function NavItems({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
 
   return (
-    <nav className="px-2 py-3 space-y-0.5">
+    <nav className="px-3 py-4 space-y-1">
+      <p className="px-2 mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+        Navigation
+      </p>
       {navItems.map((item) => {
-        const isActive =
-          pathname === item.href || pathname.startsWith(item.href + "/");
+        const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
         return (
           <Link
             key={item.href}
             href={item.href}
             onClick={onNavigate}
-            className={`flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] transition-colors ${
+            className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all duration-150 ${
               isActive
-                ? "bg-primary text-primary-foreground font-medium"
+                ? "bg-foreground text-background font-medium shadow-sm"
                 : "text-muted-foreground hover:text-foreground hover:bg-accent"
             }`}
           >
-            <item.icon className="h-4 w-4" />
+            <item.icon className={`h-4 w-4 ${isActive ? "text-background" : ""}`} />
             <span className="flex-1">{item.label}</span>
-            {item.badge && vehicleCount !== undefined && vehicleCount > 0 && (
-              <span
-                className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-                  isActive
-                    ? "bg-primary-foreground/20 text-primary-foreground"
-                    : "bg-primary/10 text-primary"
-                }`}
-              >
-                {vehicleCount > 999
-                  ? `${(vehicleCount / 1000).toFixed(1)}k`
-                  : vehicleCount}
-              </span>
-            )}
+            {isActive && <ChevronRight className="h-3 w-3 opacity-50" />}
           </Link>
         );
       })}
@@ -63,50 +49,49 @@ function NavItems({ vehicleCount, onNavigate }: CustomerNavProps & { onNavigate?
   );
 }
 
-function SidebarLogo() {
+function SidebarBrand() {
   return (
-    <div className="px-4 py-4 flex items-center gap-2.5 bg-gradient-to-r from-primary/5 to-transparent">
-      <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-sm">
-        <Gavel className="h-4 w-4 text-primary-foreground" />
+    <div className="px-4 py-5 flex items-center gap-3">
+      <div className="h-9 w-9 rounded-xl overflow-hidden bg-foreground/5 flex items-center justify-center ring-1 ring-border">
+        <Image src="/background.png" alt="SS Holdings" width={32} height={32} className="rounded-lg" />
       </div>
       <div>
-        <h1 className="text-sm font-bold leading-none tracking-tight">
-          JP Auction
-        </h1>
-        <p className="text-[11px] text-muted-foreground">Vehicle Search</p>
+        <h1 className="text-sm font-bold leading-none tracking-tight">JP Auction</h1>
+        <p className="text-[10px] text-muted-foreground mt-0.5">SS Holdings</p>
       </div>
     </div>
   );
 }
 
-export function CustomerSidebar({ vehicleCount }: CustomerNavProps) {
+export function CustomerSidebar() {
   return (
-    <aside className="w-[220px] flex-shrink-0 border-r bg-card flex-col hidden md:flex">
-      <SidebarLogo />
-      <Separator />
+    <aside className="w-[200px] flex-shrink-0 border-r bg-card flex-col hidden md:flex">
+      <SidebarBrand />
+      <div className="h-px bg-border mx-3" />
       <ScrollArea className="flex-1">
-        <NavItems vehicleCount={vehicleCount} />
+        <NavItems />
       </ScrollArea>
+      <div className="h-px bg-border mx-3" />
+      <div className="px-4 py-3">
+        <p className="text-[9px] text-muted-foreground/50 text-center">Partners for Success</p>
+      </div>
     </aside>
   );
 }
 
-export function MobileNav({ vehicleCount }: CustomerNavProps) {
+export function MobileNav() {
   const [open, setOpen] = useState(false);
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger className="md:hidden p-2 rounded-md hover:bg-accent transition-colors">
+      <SheetTrigger className="md:hidden p-1.5 -ml-1 rounded-md hover:bg-accent transition-colors">
         <Menu className="h-5 w-5" />
       </SheetTrigger>
-      <SheetContent side="left" className="w-[260px] p-0">
-        <SidebarLogo />
-        <Separator />
+      <SheetContent side="left" className="w-[240px] p-0">
+        <SidebarBrand />
+        <div className="h-px bg-border mx-3" />
         <ScrollArea className="flex-1">
-          <NavItems
-            vehicleCount={vehicleCount}
-            onNavigate={() => setOpen(false)}
-          />
+          <NavItems onNavigate={() => setOpen(false)} />
         </ScrollArea>
       </SheetContent>
     </Sheet>
