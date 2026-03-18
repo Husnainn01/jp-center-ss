@@ -6,9 +6,11 @@ import asyncio
 import base64
 import re
 import time
+from datetime import date as date_type
 from playwright.async_api import Page, BrowserContext
-from db import upsert_auctions, get_existing_item_ids
+from db import upsert_auctions, get_existing_item_ids, normalize_auction_date
 from storage import upload_image
+from jst import should_scrape_today, get_target_date, now_jst, today_jst
 
 ALL_MAKERS = [
     "TOYOTA", "LEXUS", "NISSAN", "HONDA", "MAZDA", "MITSUBISHI",
@@ -71,6 +73,11 @@ async def ninja_search_and_extract(context: BrowserContext, makers: list[str] | 
 
     makers = makers or ALL_MAKERS
 
+    target_date = get_target_date()
+    scrape_today = should_scrape_today()
+    jst_now = now_jst()
+    print(f"  [ninja] JST time: {jst_now.strftime('%Y-%m-%d %H:%M')}")
+    print(f"  [ninja] Target date: {target_date} ({'today + future' if scrape_today else 'tomorrow + future only'})")
     print(f"  [ninja] Current URL: {page.url[:60]}...")
     print(f"  [ninja] Makers to scrape: {', '.join(makers)}")
     print(f"  [ninja] Limits: {MAX_VEHICLES_PER_MAKER} vehicles, {MAX_TIME_PER_MAKER//60} min per maker")
@@ -283,15 +290,26 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
 
         print(f"  [ninja] {maker} p{page_num}: {len(vehicle_params)} vehicles ({skipped} existing, {len(new_params)} new)")
 
-        # Extract new vehicles
+        # Extract new vehicles (filter by target date)
+        target = get_target_date()
         vehicles = []
+        skipped_date = 0
         for vp in new_params:
             try:
                 v = await _extract_vehicle_detail(page, context, vp, maker)
                 if v and v.get("item_id"):
+                    # Filter: skip vehicles with auction dates before target date
+                    auction_date_str = v.get("auction_date", "")
+                    auction_date = normalize_auction_date(auction_date_str, "uss")
+                    if auction_date and auction_date < target:
+                        skipped_date += 1
+                        continue
                     vehicles.append(v)
             except Exception as e:
                 print(f"  [ninja] Detail failed: {e}")
+
+        if skipped_date:
+            print(f"  [ninja] {maker} p{page_num}: skipped {skipped_date} vehicles with past auction dates")
 
         if vehicles:
             result = upsert_auctions(vehicles)

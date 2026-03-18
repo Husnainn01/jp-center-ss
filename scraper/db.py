@@ -8,6 +8,7 @@ from decimal import Decimal
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
+from jst import today_jst
 
 load_dotenv()
 
@@ -238,5 +239,87 @@ def is_site_enabled(site_id: str) -> bool:
             {"site_id": site_id},
         ).fetchone()
         return bool(row and row[0])
+    finally:
+        session.close()
+
+
+def get_expired_auctions_with_images() -> list[dict]:
+    """Get all expired auctions that have images, so we can delete from R2 before removing DB records."""
+    session = Session()
+    try:
+        rows = session.execute(
+            text("""
+                SELECT id, item_id, image_url, images, exhibit_sheet, source
+                FROM auctions
+                WHERE auction_date_norm < :today
+                AND auction_date_norm IS NOT NULL
+            """),
+            {"today": today_jst()},
+        ).fetchall()
+        results = []
+        for row in rows:
+            images_json = row[2] or "[]"
+            if isinstance(images_json, str):
+                try:
+                    images_list = json.loads(images_json)
+                except:
+                    images_list = []
+            else:
+                images_list = images_json if isinstance(images_json, list) else []
+            results.append({
+                "id": row[0],
+                "item_id": row[1],
+                "image_url": row[2],
+                "images": images_list,
+                "exhibit_sheet": row[4],
+                "source": row[5],
+            })
+        return results
+    finally:
+        session.close()
+
+
+def delete_expired_auctions() -> int:
+    """Delete auctions where auction_date_norm is before today (JST). Returns count deleted."""
+    session = Session()
+    try:
+        # First delete car_list_items that reference these auctions
+        session.execute(
+            text("""
+                DELETE FROM car_list_items
+                WHERE auction_id IN (
+                    SELECT id FROM auctions
+                    WHERE auction_date_norm < :today
+                    AND auction_date_norm IS NOT NULL
+                )
+            """),
+            {"today": today_jst()},
+        )
+        # Then delete bid_requests that reference these auctions
+        session.execute(
+            text("""
+                DELETE FROM bid_requests
+                WHERE auction_id IN (
+                    SELECT id FROM auctions
+                    WHERE auction_date_norm < :today
+                    AND auction_date_norm IS NOT NULL
+                )
+            """),
+            {"today": today_jst()},
+        )
+        # Now delete the auctions
+        result = session.execute(
+            text("""
+                DELETE FROM auctions
+                WHERE auction_date_norm < :today
+                AND auction_date_norm IS NOT NULL
+            """),
+            {"today": today_jst()},
+        )
+        session.commit()
+        return result.rowcount
+    except Exception as e:
+        session.rollback()
+        raise e
     finally:
         session.close()

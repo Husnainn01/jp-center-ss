@@ -9,6 +9,7 @@ import time
 from playwright.async_api import Page, BrowserContext
 from db import upsert_auctions, get_existing_item_ids
 from storage import upload_image
+from jst import should_scrape_today, now_jst
 
 BATCH_SIZE = 20
 MAX_VEHICLES_TOTAL = 2000
@@ -24,8 +25,11 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     existing_ids = get_existing_item_ids("iauc")
     print(f"  [iauc] {len(existing_ids)} existing vehicles in DB (will skip)")
 
-    # === Step 1: Select upcoming auctions ===
-    print("  [iauc] Selecting upcoming auctions...")
+    # === Step 1: Select upcoming auctions (smart date based on JST) ===
+    scrape_today = should_scrape_today()
+    jst_now = now_jst()
+    print(f"  [iauc] JST time: {jst_now.strftime('%Y-%m-%d %H:%M')} — {'including' if scrape_today else 'excluding'} today's auctions")
+
     await page.evaluate("""() => {
         document.querySelectorAll('input[name="e[]"]').forEach(cb => { if (cb.checked) cb.click(); });
         document.querySelectorAll('input[name="d[]"]').forEach(cb => { if (cb.checked) cb.click(); });
@@ -36,17 +40,20 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     await page.click("a.title-button.checkbox_on_all")
     await asyncio.sleep(1)
 
-    # Uncheck Today (finished auctions)
-    days = await page.evaluate("""() => {
-        return Array.from(document.querySelectorAll('button.day-button')).map(btn => {
-            const r = btn.getBoundingClientRect();
-            return { text: btn.textContent.trim(), x: r.x + r.width/2, y: r.y + r.height/2 };
-        });
-    }""")
-    today = next((d for d in days if d['text'] == 'Today'), None)
-    if today:
-        await page.mouse.click(today['x'], today['y'])
-        await asyncio.sleep(1)
+    # After 2 PM JST: uncheck Today (auctions finished, switch to tomorrow)
+    # Before 2 PM JST: keep Today checked (still active auctions)
+    if not scrape_today:
+        days = await page.evaluate("""() => {
+            return Array.from(document.querySelectorAll('button.day-button')).map(btn => {
+                const r = btn.getBoundingClientRect();
+                return { text: btn.textContent.trim(), x: r.x + r.width/2, y: r.y + r.height/2 };
+            });
+        }""")
+        today_btn = next((d for d in days if d['text'] == 'Today'), None)
+        if today_btn:
+            await page.mouse.click(today_btn['x'], today_btn['y'])
+            await asyncio.sleep(1)
+            print("  [iauc] Unchecked 'Today' — scraping tomorrow's auctions only")
 
     checked = await page.evaluate('() => document.querySelectorAll(\'input[name="d[]"]:checked\').length')
     print(f"  [iauc] {checked} auction sites selected (all upcoming)")

@@ -1,4 +1,4 @@
-"""iAUC sync: login → scrape → DB."""
+"""iAUC sync: login → scrape → DB → cleanup expired."""
 
 import time
 import asyncio
@@ -7,6 +7,7 @@ from playwright.async_api import async_playwright
 from iauc_login import iauc_login, iauc_logout
 from iauc_scraper import iauc_search_and_extract
 from db import log_sync, get_site_credentials, is_site_enabled
+from cleanup import run_cleanup
 
 
 async def run_iauc_sync():
@@ -49,6 +50,15 @@ async def run_iauc_sync():
             scraped_ids = await iauc_search_and_extract(page, context)
 
             total = len(scraped_ids)
+
+            # Cleanup expired auctions + R2 images
+            print("[iauc-sync] Running cleanup of expired auctions...")
+            try:
+                cleanup_result = run_cleanup()
+                print(f"[iauc-sync] Cleanup: {cleanup_result['expired_auctions']} auctions deleted, {cleanup_result['r2_images_deleted']} R2 images deleted")
+            except Exception as ce:
+                print(f"[iauc-sync] Cleanup error (non-fatal): {ce}")
+
             duration_ms = int((time.time() - start) * 1000)
             log_sync(0, 0, 0, total, duration_ms, source="iauc")
             print(f"[iauc-sync] Complete in {duration_ms/1000:.1f}s — {total} vehicles")

@@ -1,4 +1,4 @@
-"""USS/NINJA sync: login → scrape → DB."""
+"""USS/NINJA sync: login → scrape → DB → cleanup expired."""
 
 import time
 import asyncio
@@ -7,6 +7,7 @@ from playwright.async_api import async_playwright
 from ninja_login import ninja_login
 from ninja_scraper import ninja_search_and_extract
 from db import log_sync, get_site_credentials, is_site_enabled
+from cleanup import run_cleanup
 
 
 async def run_ninja_sync(makers: list[str] | None = None):
@@ -46,6 +47,15 @@ async def run_ninja_sync(makers: list[str] | None = None):
             scraped_ids = await ninja_search_and_extract(context, makers=makers)
 
             total = len(scraped_ids)
+
+            # Cleanup expired auctions + R2 images
+            print("[ninja-sync] Running cleanup of expired auctions...")
+            try:
+                cleanup_result = run_cleanup()
+                print(f"[ninja-sync] Cleanup: {cleanup_result['expired_auctions']} auctions deleted, {cleanup_result['r2_images_deleted']} R2 images deleted")
+            except Exception as ce:
+                print(f"[ninja-sync] Cleanup error (non-fatal): {ce}")
+
             duration_ms = int((time.time() - start) * 1000)
             log_sync(0, 0, 0, total, duration_ms, source="ninja")
             print(f"[ninja-sync] Complete in {duration_ms/1000:.1f}s — {total} vehicles")
