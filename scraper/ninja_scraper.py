@@ -41,22 +41,53 @@ MAX_TIME_PER_MAKER = 14400  # 4 hours per maker (safety only)
 
 
 async def _select_maker(page: Page, brand_code: str):
-    """Navigate to searchcondition (if needed) then select maker via seniBrand."""
-    # If not on searchcondition, go back first (seniToSearchcondition is available on all NINJA pages)
-    if "searchcondition" not in page.url:
+    """Navigate to searchcondition (if needed) then select maker via seniBrand.
+    Resilient: retries with hard navigation if JS context is lost."""
+
+    for attempt in range(3):
+        # Step 1: Get to searchcondition page
+        if "searchcondition" not in page.url:
+            try:
+                has_fn = await page.evaluate("() => typeof seniToSearchcondition === 'function'")
+                if has_fn:
+                    await page.evaluate("() => seniToSearchcondition()")
+                    await page.wait_for_load_state("networkidle", timeout=30000)
+                    await asyncio.sleep(2)
+                else:
+                    raise Exception("seniToSearchcondition not available")
+            except:
+                # Hard navigate back to searchcondition
+                await page.goto("https://www.ninja-cartrade.jp/ninja/searchcondition.action",
+                                wait_until="networkidle", timeout=30000)
+                await asyncio.sleep(2)
+
+        # Step 2: Verify seniBrand is available and call it
         try:
-            await page.evaluate("() => seniToSearchcondition()")
-            await page.wait_for_load_state("networkidle", timeout=30000)
-            await asyncio.sleep(2)
-        except:
-            # Fallback: browser back
-            await page.go_back()
+            has_brand = await page.evaluate("() => typeof seniBrand === 'function'")
+            if not has_brand:
+                raise Exception("seniBrand not available")
+            await page.evaluate(f"() => seniBrand('{brand_code}')")
             await page.wait_for_load_state("networkidle", timeout=30000)
             await asyncio.sleep(2)
 
-    await page.evaluate(f"() => seniBrand('{brand_code}')")
-    await page.wait_for_load_state("networkidle", timeout=30000)
-    await asyncio.sleep(2)
+            # Step 3: Verify we landed on makersearch (makerListChoiceCarCat should exist)
+            has_model_fn = await page.evaluate("() => typeof makerListChoiceCarCat === 'function'")
+            if has_model_fn:
+                return  # Success
+            # If not, we might be on a different page — retry
+            print(f"  [ninja] _select_maker: makerListChoiceCarCat not found after seniBrand, retrying ({attempt+1}/3)")
+        except Exception as e:
+            print(f"  [ninja] _select_maker: attempt {attempt+1}/3 failed: {e}")
+
+        # Force back to searchcondition for retry
+        try:
+            await page.goto("https://www.ninja-cartrade.jp/ninja/searchcondition.action",
+                            wait_until="networkidle", timeout=30000)
+            await asyncio.sleep(2)
+        except:
+            pass
+
+    raise Exception(f"_select_maker failed after 3 attempts for brand_code={brand_code}")
 
 
 
@@ -419,8 +450,14 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
                         except:
                             pass
 
-            # Reset form target
-            await page.evaluate("() => document.getElementById('form1').setAttribute('target', '')")
+            # Reset form target and verify main page is still on results
+            try:
+                await page.evaluate("() => document.getElementById('form1').setAttribute('target', '')")
+            except:
+                pass
+
+            # If the main page got navigated away, the pagination will break
+            # downstream — that's OK, _select_maker will recover on next model
 
             if sheet_urls:
                 print(f"  [ninja] {maker} p{page_num}: found {len(sheet_urls)} exhibit sheets")
