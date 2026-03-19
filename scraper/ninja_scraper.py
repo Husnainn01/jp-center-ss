@@ -12,11 +12,16 @@ from db import upsert_auctions, get_existing_item_ids, normalize_auction_date
 from storage import upload_image
 from jst import should_scrape_today, get_target_date, now_jst, today_jst
 
-ALL_MAKERS = [
+# Japanese makers first, foreign after — ensures JP brands get scraped
+# before time/vehicle limits kick in during daytime runs
+JAPANESE_MAKERS = [
     "TOYOTA", "LEXUS", "NISSAN", "HONDA", "MAZDA", "MITSUBISHI",
     "SUBARU", "DAIHATSU", "SUZUKI", "ISUZU", "HINO",
+]
+FOREIGN_MAKERS = [
     "MERCEDES BENZ", "BMW", "AUDI", "VOLKSWAGEN", "PORSCHE",
 ]
+ALL_MAKERS = JAPANESE_MAKERS + FOREIGN_MAKERS
 
 BRAND_CODES = {
     "LEXUS": "00", "TOYOTA": "01", "NISSAN": "04", "HONDA": "06",
@@ -25,10 +30,10 @@ BRAND_CODES = {
     "AUDI": "46", "VOLKSWAGEN": "47", "PORSCHE": "49",
 }
 
-# Limits per maker to ensure all makers get scraped each cycle
-MAX_PAGES_PER_MAKER = 20
-MAX_VEHICLES_PER_MAKER = 500
-MAX_TIME_PER_MAKER = 1800  # 30 minutes in seconds
+# Limits per maker — turbo settings for faster scraping
+MAX_PAGES_PER_MAKER = 40
+MAX_VEHICLES_PER_MAKER = 1000
+MAX_TIME_PER_MAKER = 3600  # 60 minutes in seconds
 
 
 async def _select_maker(page: Page, brand_code: str):
@@ -38,16 +43,16 @@ async def _select_maker(page: Page, brand_code: str):
         try:
             await page.evaluate("() => seniToSearchcondition()")
             await page.wait_for_load_state("networkidle", timeout=30000)
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
         except:
             # Fallback: browser back
             await page.go_back()
             await page.wait_for_load_state("networkidle", timeout=30000)
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
 
     await page.evaluate(f"() => seniBrand('{brand_code}')")
     await page.wait_for_load_state("networkidle", timeout=30000)
-    await asyncio.sleep(3)
+    await asyncio.sleep(2)
 
 
 async def _get_maker_vehicle_count(page: Page, brand_code: str) -> int:
@@ -100,10 +105,14 @@ async def ninja_search_and_extract(context: BrowserContext, makers: list[str] | 
             maker_counts.append((maker, 0))
             print(f"  [ninja]   {maker}: failed to count ({e})")
 
-    # Sort smallest first so small makers finish quickly
-    maker_counts.sort(key=lambda x: x[1])
+    # Sort: Japanese makers first (smallest first within group), then foreign (smallest first)
+    jp_counts = [(m, c) for m, c in maker_counts if m in set(JAPANESE_MAKERS)]
+    foreign_counts = [(m, c) for m, c in maker_counts if m not in set(JAPANESE_MAKERS)]
+    jp_counts.sort(key=lambda x: x[1])
+    foreign_counts.sort(key=lambda x: x[1])
+    maker_counts = jp_counts + foreign_counts
     sorted_makers = [m for m, _ in maker_counts]
-    print(f"  [ninja] Scrape order (smallest first): {', '.join(sorted_makers)}")
+    print(f"  [ninja] Scrape order (JP first, smallest first): {', '.join(sorted_makers)}")
 
     for maker in sorted_makers:
         print(f"  [ninja] Scraping {maker}...")
@@ -169,7 +178,7 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
         try:
             await page.evaluate("() => allSearch()")
             await page.wait_for_load_state("networkidle", timeout=30000)
-            await asyncio.sleep(5)
+            await asyncio.sleep(3)
 
             body = await page.inner_text("body")
             if "more than 1,000" not in body.lower() and "1,000items" not in body.lower():
@@ -230,7 +239,7 @@ async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, 
     cat_id = model["catId"]
     await page.evaluate(f"() => makerListChoiceCarCat('{cat_id}')")
     await page.wait_for_load_state("networkidle", timeout=30000)
-    await asyncio.sleep(5)
+    await asyncio.sleep(3)
 
     body = await page.inner_text("body")
     if "more than 1,000" in body.lower() or "1,000items" in body.lower():
@@ -327,7 +336,7 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
         if not has_next:
             break
         await page.wait_for_load_state("networkidle", timeout=30000)
-        await asyncio.sleep(5)
+        await asyncio.sleep(3)
 
     if page_num >= MAX_PAGES_PER_MAKER:
         print(f"  [ninja] {maker}: reached page limit ({MAX_PAGES_PER_MAKER}), moving to next maker")
@@ -342,7 +351,7 @@ async def _extract_vehicle_detail(page: Page, context: BrowserContext, params: d
 
         await page.evaluate(f"() => seniCarDetail('{idx}', '{site}', '{times}', '{bid_no}', '')")
         await page.wait_for_load_state("networkidle", timeout=15000)
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
         text = await page.inner_text("body")
 
@@ -388,7 +397,7 @@ async def _extract_vehicle_detail(page: Page, context: BrowserContext, params: d
             history.back();
         }""")
         await page.wait_for_load_state("networkidle", timeout=15000)
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
         return vehicle
 
@@ -396,7 +405,7 @@ async def _extract_vehicle_detail(page: Page, context: BrowserContext, params: d
         try:
             await page.go_back()
             await page.wait_for_load_state("networkidle", timeout=10000)
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
         except:
             pass
         return None
