@@ -54,7 +54,7 @@ export default function LoginPage() {
               className="rounded-full"
             />
           </div>
-          <h1 className="text-3xl font-bold text-white mb-3">JP Auction Center</h1>
+          <h1 className="text-3xl font-bold text-white mb-3">SS Holdings Auction</h1>
           <p className="text-slate-400 text-sm max-w-sm mx-auto leading-relaxed">
             Access thousands of vehicles from Japan&apos;s top auction houses.
             Search, bid, and manage your inventory all in one place.
@@ -92,7 +92,7 @@ export default function LoginPage() {
                 className="rounded-full"
               />
             </div>
-            <h1 className="text-xl font-bold">JP Auction Center</h1>
+            <h1 className="text-xl font-bold">SS Holdings Auction</h1>
           </div>
 
           <div className="mb-8">

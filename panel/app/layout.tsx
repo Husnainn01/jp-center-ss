@@ -7,8 +7,11 @@ import { Providers } from "./providers";
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "JP Auction Panel",
+  title: "SS Holdings Auction",
   description: "Japanese car auction listings dashboard",
+  icons: {
+    icon: "/background.png",
+  },
 };
 
 export default function RootLayout({

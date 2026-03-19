@@ -229,7 +229,7 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <select value={get("auctionHouse")} onChange={e => update({ auctionHouse: e.target.value })} className={sel}>
             <option value="">All Auctions</option>
-            {filterOptions.auctionHouses.map(h => <option key={h.value} value={h.value}>{h.value} ({h.count})</option>)}
+            {filterOptions.auctionHouses.map(h => <option key={h.value} value={h.value}>{h.value}</option>)}
           </select>
 
           <select value={get("minPrice")} onChange={e => update({ minPrice: e.target.value })} className={sel}>

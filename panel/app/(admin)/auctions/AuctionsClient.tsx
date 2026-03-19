@@ -147,7 +147,7 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
                 <label className="text-[10px] font-medium text-muted-foreground uppercase">Auction</label>
                 <select value={get("auctionHouse")} onChange={e => update({ auctionHouse: e.target.value })} className={sel}>
                   <option value="">All</option>
-                  {filterOptions.auctionHouses.map(h => <option key={h.value} value={h.value}>{h.value} ({h.count})</option>)}
+                  {filterOptions.auctionHouses.map(h => <option key={h.value} value={h.value}>{h.value}</option>)}
                 </select>
               </div>
               <div className="space-y-0.5">
