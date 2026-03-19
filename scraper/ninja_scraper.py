@@ -40,9 +40,9 @@ MAX_VEHICLES_PER_MAKER = 99999
 MAX_TIME_PER_MAKER = 14400  # 4 hours per maker (safety only)
 
 
-async def _select_maker(page: Page, brand_code: str):
+async def _select_maker(page: Page, brand_code: str, context: BrowserContext | None = None):
     """Navigate to searchcondition (if needed) then select maker via seniBrand.
-    Resilient: retries with hard navigation if JS context is lost."""
+    Resilient: re-logins if session is lost."""
 
     for attempt in range(3):
         # Step 1: Get to searchcondition page
@@ -56,36 +56,53 @@ async def _select_maker(page: Page, brand_code: str):
                 else:
                     raise Exception("seniToSearchcondition not available")
             except:
-                # Hard navigate back to searchcondition
-                await page.goto("https://www.ninja-cartrade.jp/ninja/searchcondition.action",
+                # Hard navigate — go to login page which redirects if session alive
+                await page.goto("https://www.ninja-cartrade.jp/ninja/",
                                 wait_until="networkidle", timeout=30000)
-                await asyncio.sleep(2)
+                await asyncio.sleep(3)
 
-        # Step 2: Verify seniBrand is available and call it
+        # Check if we got kicked to login page (session expired)
+        has_brand = await page.evaluate("() => typeof seniBrand === 'function'")
+        if not has_brand:
+            print(f"  [ninja] _select_maker: session lost, re-logging in (attempt {attempt+1}/3)...")
+            if context:
+                from ninja_login import ninja_login
+                from db import get_site_credentials
+                user_id, password = get_site_credentials("uss")
+                if user_id and password:
+                    # Close current page, re-login creates a new one
+                    await page.close()
+                    ok = await ninja_login(context, user_id, password)
+                    if ok:
+                        page = context.pages[-1]
+                        # Update the reference in the calling scope won't work,
+                        # but we can navigate this new page
+                        has_brand = await page.evaluate("() => typeof seniBrand === 'function'")
+                        if not has_brand:
+                            print(f"  [ninja] _select_maker: re-login succeeded but seniBrand still missing")
+                            continue
+                    else:
+                        print(f"  [ninja] _select_maker: re-login failed")
+                        continue
+                else:
+                    print(f"  [ninja] _select_maker: no credentials for re-login")
+                    continue
+            else:
+                continue
+
+        # Step 2: Call seniBrand
         try:
-            has_brand = await page.evaluate("() => typeof seniBrand === 'function'")
-            if not has_brand:
-                raise Exception("seniBrand not available")
             await page.evaluate(f"() => seniBrand('{brand_code}')")
             await page.wait_for_load_state("networkidle", timeout=30000)
             await asyncio.sleep(2)
 
-            # Step 3: Verify we landed on makersearch (makerListChoiceCarCat should exist)
+            # Step 3: Verify we landed on makersearch
             has_model_fn = await page.evaluate("() => typeof makerListChoiceCarCat === 'function'")
             if has_model_fn:
-                return  # Success
-            # If not, we might be on a different page — retry
-            print(f"  [ninja] _select_maker: makerListChoiceCarCat not found after seniBrand, retrying ({attempt+1}/3)")
+                return page  # Success — return page (may be new after re-login)
+            print(f"  [ninja] _select_maker: makerListChoiceCarCat not found, retrying ({attempt+1}/3)")
         except Exception as e:
             print(f"  [ninja] _select_maker: attempt {attempt+1}/3 failed: {e}")
-
-        # Force back to searchcondition for retry
-        try:
-            await page.goto("https://www.ninja-cartrade.jp/ninja/searchcondition.action",
-                            wait_until="networkidle", timeout=30000)
-            await asyncio.sleep(2)
-        except:
-            pass
 
     raise Exception(f"_select_maker failed after 3 attempts for brand_code={brand_code}")
 
@@ -115,6 +132,8 @@ async def ninja_search_and_extract(context: BrowserContext, makers: list[str] | 
     for maker in makers:
         print(f"  [ninja] Scraping {maker}...")
         try:
+            # Always get the latest page from context (may change after re-login)
+            page = context.pages[-1] if context.pages else await context.new_page()
             ids = await _scrape_maker(page, context, maker, existing_ids)
             all_ids.extend(ids)
             print(f"  [ninja] {maker}: {len(ids)} vehicles total")
@@ -136,7 +155,7 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
         print(f"  [ninja] {maker}: no brand code, skipping")
         return []
 
-    await _select_maker(page, brand_code)
+    page = await _select_maker(page, brand_code, context)
 
     # Now on makersearch.action — get models via makerListChoiceCarCat links
     models = await page.evaluate("""() => {
@@ -222,7 +241,7 @@ async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, 
         return []
 
     # Re-select maker to get back to model list
-    await _select_maker(page, brand_code)
+    page = await _select_maker(page, brand_code, context)
 
     # Select all body types
     await page.evaluate("""() => {
@@ -247,7 +266,7 @@ async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, 
     print(f"  [ninja] {maker} > {model['name']}: >1000, splitting by body type...")
 
     # Go back to maker page and re-select
-    await _select_maker(page, brand_code)
+    page = await _select_maker(page, brand_code, context)
 
     # Get available body types
     body_types = await page.evaluate("""() => {
@@ -266,7 +285,7 @@ async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, 
             break
 
         # Re-select maker
-        await _select_maker(page, brand_code)
+        page = await _select_maker(page, brand_code, context)
 
         # Uncheck all body types, then check only this one
         await page.evaluate("""(btValue) => {
@@ -411,11 +430,21 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
         if new_vehicles:
             # Step 1: Get exhibit sheet URLs by submitting form1 to new tabs
             sheet_urls = {}
+            sheet_errors = 0
             for vehicle, _ in new_vehicles:
+                # Stop fetching sheets if main page is broken (avoid cascade)
+                if sheet_errors >= 2:
+                    break
                 rv_match = next((rv for rv in raw_vehicles if rv['bidNo'] == vehicle['lot_number']), None)
                 if not rv_match:
                     continue
                 try:
+                    # Check form1 still exists on main page before submitting
+                    has_form = await page.evaluate("() => !!document.getElementById('form1')")
+                    if not has_form:
+                        print(f"  [ninja] {maker} p{page_num}: form1 lost, stopping sheet fetch")
+                        break
+
                     new_page_promise = context.wait_for_event("page", timeout=10000)
                     await page.evaluate("""(v) => {
                         document.getElementById('carKindType').value = '1';
@@ -442,22 +471,21 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
                     if sheet_url:
                         sheet_urls[vehicle['item_id']] = sheet_url
                     await detail_page.close()
+                    sheet_errors = 0  # Reset on success
                 except Exception as e:
+                    sheet_errors += 1
                     # Close any extra pages that may have opened
-                    for p in context.pages[1:]:
+                    for extra in context.pages[1:]:
                         try:
-                            await p.close()
+                            await extra.close()
                         except:
                             pass
 
-            # Reset form target and verify main page is still on results
+            # Reset form target
             try:
-                await page.evaluate("() => document.getElementById('form1').setAttribute('target', '')")
+                await page.evaluate("() => document.getElementById('form1')?.setAttribute('target', '')")
             except:
                 pass
-
-            # If the main page got navigated away, the pagination will break
-            # downstream — that's OK, _select_maker will recover on next model
 
             if sheet_urls:
                 print(f"  [ninja] {maker} p{page_num}: found {len(sheet_urls)} exhibit sheets")
