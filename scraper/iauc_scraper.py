@@ -365,7 +365,17 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                 if new_vehicles:
                     semaphore = asyncio.Semaphore(CONCURRENT_TABS)
 
-                    async def fetch_images(vid: str):
+                    known_makers = [
+                        "TOYOTA", "LEXUS", "NISSAN", "HONDA", "MAZDA", "MITSUBISHI",
+                        "SUBARU", "DAIHATSU", "SUZUKI", "BMW", "MERCEDES-BENZ", "AUDI",
+                        "VOLKSWAGEN", "PORSCHE", "ISUZU", "HINO", "VOLVO", "JAGUAR",
+                        "FORD", "GM", "CHRYSLER", "ALFA ROMEO", "FIAT", "FERRARI",
+                        "MASERATI", "OPEL", "SMART", "ROVER", "BENTLEY", "TESLA",
+                        "PEUGEOT", "RENAULT", "CITROEN", "LAMBORGHINI", "BYD",
+                    ]
+
+                    async def fetch_images_and_maker(vid: str):
+                        """Open detail page: grab maker + 1 exhibit sheet + 2 car photos."""
                         async with semaphore:
                             new_page = await context.new_page()
                             try:
@@ -373,8 +383,18 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                                 await new_page.goto(detail_url, wait_until="domcontentloaded", timeout=20000)
                                 await asyncio.sleep(2)
                                 if "detail" not in new_page.url:
-                                    return {"car_urls": [], "sheet_url": None}
+                                    return {"car_urls": [], "sheet_url": None, "maker": ""}
 
+                                # Extract maker from detail page text
+                                detail_text = await new_page.inner_text("body")
+                                maker = ""
+                                for line in detail_text.split("\n"):
+                                    line = line.strip()
+                                    if line in known_makers:
+                                        maker = line
+                                        break
+
+                                # Extract images
                                 imgs = await new_page.evaluate("""() => {
                                     return Array.from(document.querySelectorAll('img'))
                                         .filter(i => i.src && i.src.includes('iauc_pic') && i.naturalWidth > 100)
@@ -396,23 +416,26 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                                     else:
                                         if len(car_urls) < 2:
                                             car_urls.append(img['src'])
-                                return {"car_urls": car_urls, "sheet_url": sheet_url}
+                                return {"car_urls": car_urls, "sheet_url": sheet_url, "maker": maker}
                             except:
-                                return {"car_urls": [], "sheet_url": None}
+                                return {"car_urls": [], "sheet_url": None, "maker": ""}
                             finally:
                                 await new_page.close()
 
                     img_results = await asyncio.gather(
-                        *[fetch_images(vid) for _, vid in new_vehicles],
+                        *[fetch_images_and_maker(vid) for _, vid in new_vehicles],
                         return_exceptions=True,
                     )
 
-                    # Upload all images in parallel
+                    # Collect makers from detail pages + upload images in parallel
+                    maker_by_idx = {}
                     upload_tasks = []
                     upload_map = []
                     for i, img_data in enumerate(img_results):
                         if isinstance(img_data, Exception):
-                            img_data = {"car_urls": [], "sheet_url": None}
+                            img_data = {"car_urls": [], "sheet_url": None, "maker": ""}
+                        if img_data.get("maker"):
+                            maker_by_idx[i] = img_data["maker"]
                         for url in img_data.get("car_urls", []):
                             upload_tasks.append(_download_and_upload(page, url))
                             upload_map.append((i, 'car'))
@@ -435,6 +458,9 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
 
                     vehicles_to_save = []
                     for i, (vehicle, vid) in enumerate(new_vehicles):
+                        # Set maker from detail page
+                        if maker_by_idx.get(i):
+                            vehicle["maker"] = maker_by_idx[i]
                         car_imgs = car_by_idx.get(i, [])
                         vehicle["images"] = car_imgs
                         vehicle["image_url"] = car_imgs[0] if car_imgs else None
