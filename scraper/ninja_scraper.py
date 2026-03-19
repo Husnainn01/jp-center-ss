@@ -40,58 +40,64 @@ MAX_VEHICLES_PER_MAKER = 99999
 MAX_TIME_PER_MAKER = 14400  # 4 hours per maker (safety only)
 
 
+async def _relogin_on_page(page: Page):
+    """Re-login on the SAME page (no new page created, reference stays valid)."""
+    from db import get_site_credentials
+    user_id, password = get_site_credentials("uss")
+    if not user_id or not password:
+        raise Exception("No USS credentials for re-login")
+
+    await page.goto("https://www.ninja-cartrade.jp/ninja/", wait_until="networkidle", timeout=60000)
+    await asyncio.sleep(2)
+    await page.fill("#loginId", user_id)
+    await page.fill("#password", password)
+    await page.evaluate("() => login()")
+    await asyncio.sleep(5)
+    await page.wait_for_load_state("networkidle", timeout=15000)
+
+    body = await page.inner_text("body")
+    if "different user" in body.lower():
+        await page.evaluate("""() => {
+            for (const a of document.querySelectorAll('a'))
+                if (a.textContent.trim() === 'Login') { a.click(); return; }
+        }""")
+        await page.wait_for_load_state("networkidle", timeout=30000)
+        await asyncio.sleep(3)
+
+    if "searchcondition" not in page.url:
+        raise Exception(f"Re-login failed, ended up at {page.url[:60]}")
+    print(f"  [ninja] Re-login successful")
+
+
 async def _select_maker(page: Page, brand_code: str, context: BrowserContext | None = None):
-    """Navigate to searchcondition (if needed) then select maker via seniBrand.
-    Resilient: re-logins if session is lost."""
+    """Navigate to searchcondition then select maker via seniBrand.
+    Re-logins on the same page if session is lost (keeps page reference valid)."""
 
     for attempt in range(3):
         # Step 1: Get to searchcondition page
-        if "searchcondition" not in page.url:
-            try:
+        try:
+            if "searchcondition" not in page.url:
                 has_fn = await page.evaluate("() => typeof seniToSearchcondition === 'function'")
                 if has_fn:
                     await page.evaluate("() => seniToSearchcondition()")
                     await page.wait_for_load_state("networkidle", timeout=30000)
                     await asyncio.sleep(2)
                 else:
-                    raise Exception("seniToSearchcondition not available")
-            except:
-                # Hard navigate — go to login page which redirects if session alive
-                await page.goto("https://www.ninja-cartrade.jp/ninja/",
-                                wait_until="networkidle", timeout=30000)
-                await asyncio.sleep(3)
-
-        # Check if we got kicked to login page (session expired)
-        has_brand = await page.evaluate("() => typeof seniBrand === 'function'")
-        if not has_brand:
-            print(f"  [ninja] _select_maker: session lost, re-logging in (attempt {attempt+1}/3)...")
-            if context:
-                from ninja_login import ninja_login
-                from db import get_site_credentials
-                user_id, password = get_site_credentials("uss")
-                if user_id and password:
-                    # Close current page, re-login creates a new one
-                    await page.close()
-                    ok = await ninja_login(context, user_id, password)
-                    if ok:
-                        page = context.pages[-1]
-                        # Update the reference in the calling scope won't work,
-                        # but we can navigate this new page
-                        has_brand = await page.evaluate("() => typeof seniBrand === 'function'")
-                        if not has_brand:
-                            print(f"  [ninja] _select_maker: re-login succeeded but seniBrand still missing")
-                            continue
-                    else:
-                        print(f"  [ninja] _select_maker: re-login failed")
-                        continue
-                else:
-                    print(f"  [ninja] _select_maker: no credentials for re-login")
-                    continue
-            else:
+                    raise Exception("JS not available")
+        except:
+            # Session likely dead — re-login on this same page
+            try:
+                print(f"  [ninja] _select_maker: session lost, re-logging in (attempt {attempt+1}/3)...")
+                await _relogin_on_page(page)
+            except Exception as e:
+                print(f"  [ninja] _select_maker: re-login failed: {e}")
                 continue
 
         # Step 2: Call seniBrand
         try:
+            has_brand = await page.evaluate("() => typeof seniBrand === 'function'")
+            if not has_brand:
+                raise Exception("seniBrand not available")
             await page.evaluate(f"() => seniBrand('{brand_code}')")
             await page.wait_for_load_state("networkidle", timeout=30000)
             await asyncio.sleep(2)
@@ -99,10 +105,15 @@ async def _select_maker(page: Page, brand_code: str, context: BrowserContext | N
             # Step 3: Verify we landed on makersearch
             has_model_fn = await page.evaluate("() => typeof makerListChoiceCarCat === 'function'")
             if has_model_fn:
-                return page  # Success — return page (may be new after re-login)
+                return page  # Success
             print(f"  [ninja] _select_maker: makerListChoiceCarCat not found, retrying ({attempt+1}/3)")
         except Exception as e:
             print(f"  [ninja] _select_maker: attempt {attempt+1}/3 failed: {e}")
+            # Try re-login for next attempt
+            try:
+                await _relogin_on_page(page)
+            except:
+                pass
 
     raise Exception(f"_select_maker failed after 3 attempts for brand_code={brand_code}")
 
