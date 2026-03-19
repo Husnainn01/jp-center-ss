@@ -258,14 +258,14 @@ def get_expired_auctions_with_images() -> list[dict]:
         ).fetchall()
         results = []
         for row in rows:
-            images_json = row[2] or "[]"
-            if isinstance(images_json, str):
+            images_raw = row[3] or "[]"
+            if isinstance(images_raw, str):
                 try:
-                    images_list = json.loads(images_json)
+                    images_list = json.loads(images_raw)
                 except:
                     images_list = []
             else:
-                images_list = images_json if isinstance(images_json, list) else []
+                images_list = images_raw if isinstance(images_raw, list) else []
             results.append({
                 "id": row[0],
                 "item_id": row[1],

@@ -262,7 +262,7 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                     break
                 await asyncio.sleep(1)
 
-            # Paginate through results for this batch
+            # Paginate through results — extract data from list, images from detail in parallel
             batch_ids = []
             page_num = 0
             while True:
@@ -277,79 +277,181 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                     print(f"  [iauc] P{pass_idx + 1} Batch {batch_num}: result limit reached ({len(batch_ids)})")
                     break
 
-                # Get vehicle IDs on current page (short format only: XX-XXXX-XXXX)
-                vehicle_ids = await page.evaluate("""() => {
-                    const items = [];
+                # ── Extract ALL vehicle data from the list page in one JS call ──
+                raw_vehicles = await page.evaluate("""() => {
+                    const results = [];
                     const seen = new Set();
-                    document.querySelectorAll('img[data-code]').forEach(img => {
-                        const code = img.getAttribute('data-code');
-                        if (!code) return;
-                        // Only use short codes (3 parts). Long codes (6 parts) return "Not Found" on detail page
-                        const parts = code.split('-');
-                        const shortCode = parts.length > 3 ? parts.slice(0, 3).join('-') : code;
-                        if (!seen.has(shortCode)) {
-                            seen.add(shortCode);
-                            items.push(shortCode);
+                    const rows = document.querySelectorAll('tr.scroll-anchor.line-auction');
+
+                    for (const row of rows) {
+                        const vid = row.getAttribute('data-vid') || '';
+                        if (!vid || seen.has(vid)) continue;
+                        seen.add(vid);
+
+                        // Get long code (contains auction date) from any data-code with 6 parts
+                        let longCode = '';
+                        row.querySelectorAll('[data-code]').forEach(el => {
+                            const c = el.getAttribute('data-code') || '';
+                            if (c.split('-').length > 3 && !longCode) longCode = c;
+                        });
+
+                        // Get thumbnail URL
+                        const thumbImg = row.querySelector('img.img-car');
+                        const thumbUrl = thumbImg ? (thumbImg.src || thumbImg.getAttribute('data-original') || '') : '';
+
+                        // Collect all TDs across this row and next 2 sibling rows (rowspan=3)
+                        const cells = {};
+                        let tr = row;
+                        for (let r = 0; r < 3 && tr; r++) {
+                            tr.querySelectorAll('td').forEach(td => {
+                                const cls = Array.from(td.classList).find(c => c.startsWith('col'));
+                                if (cls) cells[cls] = td.innerText.trim();
+                            });
+                            tr = tr.nextElementSibling;
                         }
-                    });
-                    return items;
+
+                        results.push({
+                            vid,
+                            longCode,
+                            thumbUrl,
+                            model_grade: cells['col3'] || '',
+                            site: cells['col4'] || '',
+                            year: cells['col5'] || '',
+                            chassis_cc: cells['col6'] || '',
+                            mileage: cells['col7'] || '',
+                            color: cells['col8'] || '',
+                            score_ext_int: (cells['col9'] || '') + ' ' + (cells['col10'] || ''),
+                            start_price: cells['col11'] || '',
+                            result_status: cells['col12'] || '',
+                            lot_no: cells['col14'] || '',
+                        });
+                    }
+                    return results;
                 }""")
 
-                if not vehicle_ids:
+                if not raw_vehicles:
                     break
 
-                new_ids = [vid for vid in vehicle_ids if f"iauc-{vid}" not in existing_ids]
-                skipped = len(vehicle_ids) - len(new_ids)
-                if page_num == 1:
-                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {len(vehicle_ids)} on page ({len(new_ids)} new, {skipped} existing)")
-                else:
-                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {len(vehicle_ids)} ({len(new_ids)} new)")
-
-                # ── Parallel vehicle extraction ──────────────────────────────────
+                # Parse and filter vehicles
                 target = get_target_date()
-                semaphore = asyncio.Semaphore(CONCURRENT_TABS)
-
-                async def extract_with_limit(vid: str):
-                    async with semaphore:
-                        new_page = await context.new_page()
-                        try:
-                            return await _extract_vehicle(new_page, vid, tid)
-                        except Exception as e:
-                            print(f"  [iauc] Detail {vid} failed: {e}")
-                            return None
-                        finally:
-                            await new_page.close()
-
-                raw_results = await asyncio.gather(
-                    *[extract_with_limit(vid) for vid in new_ids],
-                    return_exceptions=True,
-                )
-
-                vehicles = []
+                new_vehicles = []
+                skipped = 0
                 skipped_date = 0
-                for v in raw_results:
-                    if not v or isinstance(v, Exception) or not v.get("item_id"):
+                for rv in raw_vehicles:
+                    item_id = f"iauc-{rv['vid']}"
+                    if item_id in existing_ids:
+                        skipped += 1
+                        batch_ids.append(item_id)
                         continue
-                    auction_date_str = v.get("auction_date", "")
+
+                    vehicle = _parse_list_row(rv)
+                    if not vehicle or not vehicle.get("item_id"):
+                        continue
+
+                    auction_date_str = vehicle.get("auction_date", "")
                     auction_date = normalize_auction_date(auction_date_str, "iauc")
                     if auction_date and auction_date < target:
                         skipped_date += 1
                         continue
-                    vehicles.append(v)
 
+                    new_vehicles.append((vehicle, rv['vid']))
+
+                total_on_page = len(raw_vehicles)
+                print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {total_on_page} on page ({len(new_vehicles)} new, {skipped} existing)")
                 if skipped_date:
-                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: skipped {skipped_date} vehicles with past auction dates")
+                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: skipped {skipped_date} past dates")
 
-                if vehicles:
-                    result = upsert_auctions(vehicles)
-                    all_ids.extend(v["item_id"] for v in vehicles)
-                    existing_ids.update(v["item_id"] for v in vehicles)
-                    img_total = sum(len(v.get("images", [])) for v in vehicles)
-                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {len(vehicles)} → DB (new:{result['new']}, imgs:{img_total})")
+                # ── Parallel: open detail pages for 1 exhibit sheet + 2 car photos ──
+                if new_vehicles:
+                    semaphore = asyncio.Semaphore(CONCURRENT_TABS)
 
-                # Track all IDs (including skipped existing)
-                for vid in vehicle_ids:
-                    item_id = f"iauc-{vid}"
+                    async def fetch_images(vid: str):
+                        async with semaphore:
+                            new_page = await context.new_page()
+                            try:
+                                detail_url = f"https://www.iauc.co.jp/detail/?vehicleId={vid}&owner_id=&from=vehicle&id=&__tid={tid}"
+                                await new_page.goto(detail_url, wait_until="domcontentloaded", timeout=20000)
+                                await asyncio.sleep(2)
+                                if "detail" not in new_page.url:
+                                    return {"car_urls": [], "sheet_url": None}
+
+                                imgs = await new_page.evaluate("""() => {
+                                    return Array.from(document.querySelectorAll('img'))
+                                        .filter(i => i.src && i.src.includes('iauc_pic') && i.naturalWidth > 100)
+                                        .map(i => ({ src: i.src, filename: i.src.split('?')[0].split('/').pop().toUpperCase() }));
+                                }""")
+
+                                car_urls = []
+                                sheet_url = None
+                                seen_urls = set()
+                                for img in imgs:
+                                    base = img['src'].split('?')[0]
+                                    if base in seen_urls:
+                                        continue
+                                    seen_urls.add(base)
+                                    fn = img['filename']
+                                    if re.match(r'^A\d+\.JPG', fn) or '_scan.' in img['src'].lower():
+                                        if not sheet_url:
+                                            sheet_url = img['src']
+                                    else:
+                                        if len(car_urls) < 2:
+                                            car_urls.append(img['src'])
+                                return {"car_urls": car_urls, "sheet_url": sheet_url}
+                            except:
+                                return {"car_urls": [], "sheet_url": None}
+                            finally:
+                                await new_page.close()
+
+                    img_results = await asyncio.gather(
+                        *[fetch_images(vid) for _, vid in new_vehicles],
+                        return_exceptions=True,
+                    )
+
+                    # Upload all images in parallel
+                    upload_tasks = []
+                    upload_map = []
+                    for i, img_data in enumerate(img_results):
+                        if isinstance(img_data, Exception):
+                            img_data = {"car_urls": [], "sheet_url": None}
+                        for url in img_data.get("car_urls", []):
+                            upload_tasks.append(_download_and_upload(page, url))
+                            upload_map.append((i, 'car'))
+                        if img_data.get("sheet_url"):
+                            upload_tasks.append(_download_and_upload(page, img_data["sheet_url"]))
+                            upload_map.append((i, 'sheet'))
+
+                    upload_results = await asyncio.gather(*upload_tasks, return_exceptions=True) if upload_tasks else []
+
+                    car_by_idx = {}
+                    sheet_by_idx = {}
+                    for j, (idx, img_type) in enumerate(upload_map):
+                        val = upload_results[j] if not isinstance(upload_results[j], Exception) else None
+                        if not val:
+                            continue
+                        if img_type == 'car':
+                            car_by_idx.setdefault(idx, []).append(val)
+                        else:
+                            sheet_by_idx[idx] = val
+
+                    vehicles_to_save = []
+                    for i, (vehicle, vid) in enumerate(new_vehicles):
+                        car_imgs = car_by_idx.get(i, [])
+                        vehicle["images"] = car_imgs
+                        vehicle["image_url"] = car_imgs[0] if car_imgs else None
+                        vehicle["exhibit_sheet"] = sheet_by_idx.get(i)
+                        vehicles_to_save.append(vehicle)
+
+                    if vehicles_to_save:
+                        result = upsert_auctions(vehicles_to_save)
+                        all_ids.extend(v["item_id"] for v in vehicles_to_save)
+                        existing_ids.update(v["item_id"] for v in vehicles_to_save)
+                        img_total = sum(len(v.get("images", [])) for v in vehicles_to_save)
+                        sheet_total = sum(1 for v in vehicles_to_save if v.get("exhibit_sheet"))
+                        print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {len(vehicles_to_save)} -> DB (new:{result['new']}, imgs:{img_total}, sheets:{sheet_total})")
+
+                # Track all IDs
+                for rv in raw_vehicles:
+                    item_id = f"iauc-{rv['vid']}"
                     if item_id not in batch_ids:
                         batch_ids.append(item_id)
 
@@ -375,6 +477,7 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                         break
                     await asyncio.sleep(1)
 
+
             # Add batch IDs to total
             for bid in batch_ids:
                 if bid not in all_ids:
@@ -390,6 +493,119 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     elapsed = time.time() - scrape_start
     print(f"  [iauc] Total: {len(all_ids)} vehicles in {elapsed/60:.1f} min")
     return all_ids
+
+
+def _parse_list_row(rv: dict) -> dict | None:
+    """Parse vehicle data from iAUC list page row."""
+    vid = rv.get("vid", "")
+    if not vid:
+        return None
+
+    # Extract auction date from long code: XX-XXXX-XXXX-XX-XXXX-YYYYMMDD
+    long_code = rv.get("longCode", "")
+    auction_date = ""
+    if long_code:
+        parts = long_code.split("-")
+        for part in parts:
+            if len(part) == 8 and part.isdigit() and part.startswith("20"):
+                auction_date = f"{part[:4]}/{part[4:6]}/{part[6:8]}"
+                break
+
+    # Model / Grade from col3 (e.g., "Aerio ／ 1.5 XR")
+    model_grade = rv.get("model_grade", "")
+    model = ""
+    grade = ""
+    if "／" in model_grade:
+        parts = model_grade.split("／", 1)
+        model = parts[0].strip()
+        grade = parts[1].strip() if len(parts) > 1 else ""
+    else:
+        model = model_grade.strip()
+
+    # Maker: detect from known_makers list
+    known_makers = [
+        "TOYOTA", "LEXUS", "NISSAN", "HONDA", "MAZDA", "MITSUBISHI",
+        "SUBARU", "DAIHATSU", "SUZUKI", "BMW", "MERCEDES-BENZ", "AUDI",
+        "VOLKSWAGEN", "PORSCHE", "ISUZU", "HINO", "VOLVO", "JAGUAR",
+        "FORD", "GM", "CHRYSLER", "ALFA ROMEO", "FIAT", "FERRARI",
+        "MASERATI", "OPEL", "SMART", "ROVER", "BENTLEY", "TESLA",
+        "PEUGEOT", "RENAULT", "CITROEN", "LAMBORGHINI", "BYD",
+    ]
+    maker = ""
+    model_upper = model.upper()
+    for m in known_makers:
+        if model_upper.startswith(m):
+            maker = m
+            model = model[len(m):].strip()
+            break
+
+    # Year
+    year_raw = rv.get("year", "").split("\n")[0].strip()
+    year = ""
+    year_match = re.search(r'(20\d{2}|19\d{2})', year_raw)
+    if year_match:
+        year = year_match.group(1)
+
+    # Chassis / CC
+    chassis_cc = rv.get("chassis_cc", "")
+    chassis = ""
+    cc = ""
+    if chassis_cc:
+        cc_parts = chassis_cc.split("\n")
+        chassis = cc_parts[0].strip() if cc_parts else ""
+        for part in cc_parts:
+            if "cc" in part.lower():
+                cc = part.strip()
+
+    # Mileage
+    mileage_raw = rv.get("mileage", "")
+    mileage = ""
+    for part in mileage_raw.split("\n"):
+        if "km" in part.lower():
+            mileage = part.strip()
+
+    # Color
+    color = rv.get("color", "").strip()
+
+    # Score
+    score_raw = rv.get("score_ext_int", "").strip()
+    rating = score_raw if score_raw and score_raw != "- -" else None
+
+    # Start price
+    start_price = None
+    price_raw = rv.get("start_price", "").strip().replace(",", "")
+    if price_raw and price_raw.isdigit() and int(price_raw) > 0:
+        start_price = str(int(price_raw) / 10000)
+
+    # Auction site
+    site = rv.get("site", "").strip()
+
+    # Lot number
+    lot_no = rv.get("lot_no", "").strip()
+
+    return {
+        "item_id": f"iauc-{vid}",
+        "lot_number": lot_no or None,
+        "maker": maker,
+        "model": model,
+        "grade": grade or None,
+        "chassis_code": chassis or None,
+        "engine_specs": cc or None,
+        "year": year or year_raw,
+        "mileage": mileage or None,
+        "inspection_expiry": None,
+        "color": color or None,
+        "rating": rating,
+        "start_price": start_price,
+        "auction_date": auction_date,
+        "auction_house": site or "iAUC",
+        "location": site,
+        "status": "upcoming",
+        "image_url": None,
+        "images": [],
+        "exhibit_sheet": None,
+        "source": "iauc",
+    }
 
 
 async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None:
