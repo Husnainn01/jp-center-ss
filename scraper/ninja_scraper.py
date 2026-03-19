@@ -556,18 +556,18 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
 
 
 def _parse_list_row(rv: dict, maker: str) -> dict | None:
-    """Parse vehicle data from list page row cells.
-    Cell layout: [0] site/date/lotNo [1] maker/model/chassis [2] year [3] trans/cc [4] mileage [5] score [6] price/status"""
+    """Parse vehicle data from NINJA list page row cells.
+    Cell layout: [0] checkbox [1] image [2] site/date/lot [3] maker/model/chassis [4] year [5] trans/cc [6] mileage [7] score [8] price/status"""
     cells = rv.get("cells", [])
-    if len(cells) < 6:
+    if len(cells) < 8:
         return None
 
-    # Cell 0: site, date, lot number
-    cell0_lines = [l.strip() for l in cells[0].split("\n") if l.strip()]
-    site_name = cell0_lines[0] if cell0_lines else ""
+    # Cell 2: site, date, lot number
+    cell2_lines = [l.strip() for l in cells[2].split("\n") if l.strip()]
+    site_name = cell2_lines[0] if cell2_lines else ""
     auction_date = ""
     lot_no = rv["bidNo"]
-    for line in cell0_lines:
+    for line in cell2_lines:
         date_match = re.search(r'(\d{4}/\d{2}/\d{2})', line)
         if date_match:
             auction_date = date_match.group(1)
@@ -575,12 +575,12 @@ def _parse_list_row(rv: dict, maker: str) -> dict | None:
         if no_match:
             lot_no = no_match.group(1)
 
-    # Cell 1: maker, model, grade, chassis
-    cell1_lines = [l.strip() for l in cells[1].split("\n") if l.strip()]
+    # Cell 3: maker, model, grade, chassis
+    cell3_lines = [l.strip() for l in cells[3].split("\n") if l.strip()]
     model = ""
     grade = ""
     chassis = ""
-    for line in cell1_lines:
+    for line in cell3_lines:
         if line == maker:
             continue
         if not model:
@@ -592,27 +592,27 @@ def _parse_list_row(rv: dict, maker: str) -> dict | None:
             # Next line is chassis code (full-width chars)
             chassis = line
 
-    # Cell 2: year
-    year = cells[2].strip() if len(cells) > 2 else ""
+    # Cell 4: year
+    year = cells[4].strip() if len(cells) > 4 else ""
 
-    # Cell 3: transmission + cc
-    cell3_lines = [l.strip() for l in cells[3].split("\n") if l.strip()]
+    # Cell 5: transmission + cc
+    cell5_lines = [l.strip() for l in cells[5].split("\n") if l.strip()]
     cc = ""
-    for line in cell3_lines:
+    for line in cell5_lines:
         cc_match = re.search(r'([\d,]+)\s*cc', line, re.IGNORECASE)
         if cc_match:
             cc = cc_match.group(0)
 
-    # Cell 4: mileage
-    mileage = cells[4].strip() if len(cells) > 4 else ""
+    # Cell 6: mileage
+    mileage = cells[6].strip() if len(cells) > 6 else ""
 
-    # Cell 5: score
-    score = cells[5].strip() if len(cells) > 5 else ""
+    # Cell 7: score
+    score = cells[7].strip() if len(cells) > 7 else ""
 
-    # Cell 6: price + status
+    # Cell 8: price + status
     start_price = None
-    if len(cells) > 6:
-        price_match = re.search(r'JPY\s*([\d,]+)', cells[6])
+    if len(cells) > 8:
+        price_match = re.search(r'JPY\s*([\d,]+)', cells[8])
         if price_match:
             price_raw = price_match.group(1).replace(",", "")
             try:

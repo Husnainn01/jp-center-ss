@@ -320,7 +320,8 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                             chassis_cc: cells['col6'] || '',
                             mileage: cells['col7'] || '',
                             color: cells['col8'] || '',
-                            score_ext_int: (cells['col9'] || '') + ' ' + (cells['col10'] || ''),
+                            shift: cells['col9'] || '',
+                            score: cells['col10'] || '',
                             start_price: cells['col11'] || '',
                             result_status: cells['col12'] || '',
                             lot_no: cells['col14'] || '',
@@ -537,8 +538,11 @@ def _parse_list_row(rv: dict) -> dict | None:
                 auction_date = f"{part[:4]}/{part[4:6]}/{part[6:8]}"
                 break
 
-    # Model / Grade from col3 (e.g., "Aerio ／ 1.5 XR")
+    # Model / Grade from col3 (e.g., "Aerio ／ 1.5 XR\nBid Free")
     model_grade = rv.get("model_grade", "")
+    # Remove "Bid Free" and other status lines
+    model_grade = "\n".join(l for l in model_grade.split("\n")
+                           if l.strip() and l.strip() not in ("Bid Free", "Bid-Closed", "Sold", "Negotiation"))
     model = ""
     grade = ""
     if "／" in model_grade:
@@ -548,65 +552,62 @@ def _parse_list_row(rv: dict) -> dict | None:
     else:
         model = model_grade.strip()
 
-    # Maker: detect from known_makers list
-    known_makers = [
-        "TOYOTA", "LEXUS", "NISSAN", "HONDA", "MAZDA", "MITSUBISHI",
-        "SUBARU", "DAIHATSU", "SUZUKI", "BMW", "MERCEDES-BENZ", "AUDI",
-        "VOLKSWAGEN", "PORSCHE", "ISUZU", "HINO", "VOLVO", "JAGUAR",
-        "FORD", "GM", "CHRYSLER", "ALFA ROMEO", "FIAT", "FERRARI",
-        "MASERATI", "OPEL", "SMART", "ROVER", "BENTLEY", "TESLA",
-        "PEUGEOT", "RENAULT", "CITROEN", "LAMBORGHINI", "BYD",
-    ]
+    # Maker will be set from detail page (fetch_images_and_maker), leave empty here
     maker = ""
-    model_upper = model.upper()
-    for m in known_makers:
-        if model_upper.startswith(m):
-            maker = m
-            model = model[len(m):].strip()
-            break
 
-    # Year
+    # Year (col5 may have "2016\n " — take first line, extract 4-digit year)
     year_raw = rv.get("year", "").split("\n")[0].strip()
     year = ""
     year_match = re.search(r'(20\d{2}|19\d{2})', year_raw)
     if year_match:
         year = year_match.group(1)
 
-    # Chassis / CC
+    # Chassis / CC (col6: "RB21S\n1500cc" or "RB21S | 1500cc")
     chassis_cc = rv.get("chassis_cc", "")
     chassis = ""
     cc = ""
     if chassis_cc:
-        cc_parts = chassis_cc.split("\n")
-        chassis = cc_parts[0].strip() if cc_parts else ""
-        for part in cc_parts:
-            if "cc" in part.lower():
-                cc = part.strip()
+        parts = [p.strip() for p in re.split(r'[\n|]', chassis_cc) if p.strip()]
+        for part in parts:
+            if re.search(r'\d+cc', part, re.IGNORECASE):
+                cc = part
+            elif not chassis:
+                chassis = part
 
-    # Mileage
+    # Mileage (col7: " \n30000km" — find the km part)
     mileage_raw = rv.get("mileage", "")
     mileage = ""
     for part in mileage_raw.split("\n"):
-        if "km" in part.lower():
-            mileage = part.strip()
+        part = part.strip()
+        if "km" in part.lower() and part != "0km":
+            mileage = part
 
-    # Color
-    color = rv.get("color", "").strip()
+    # Color (col8: "ﾊﾟｰﾙﾎﾜｲﾄ\n\n34K" — take first line only)
+    color_raw = rv.get("color", "")
+    color_lines = [l.strip() for l in color_raw.split("\n") if l.strip()]
+    color = color_lines[0] if color_lines else ""
 
-    # Score
-    score_raw = rv.get("score_ext_int", "").strip()
-    rating = score_raw if score_raw and score_raw != "- -" else None
+    # Score (col10: "3.5\n-  -" or "4.5\nB C" — first line is score, rest is ext/int)
+    score_raw = rv.get("score", "")
+    score_lines = [l.strip() for l in score_raw.split("\n") if l.strip()]
+    score = score_lines[0] if score_lines else ""
+    ext_int = ""
+    if len(score_lines) > 1:
+        ext_int = score_lines[1]
+    rating = None
+    if score and score not in ("-", "***", "0"):
+        rating = f"{score} {ext_int}".strip() if ext_int and ext_int != "-  -" else score
 
-    # Start price
+    # Start price (col11: "1,380,000" — in yen, convert to man-yen)
     start_price = None
     price_raw = rv.get("start_price", "").strip().replace(",", "")
     if price_raw and price_raw.isdigit() and int(price_raw) > 0:
         start_price = str(int(price_raw) / 10000)
 
-    # Auction site
+    # Auction site (col4)
     site = rv.get("site", "").strip()
 
-    # Lot number
+    # Lot number (col14)
     lot_no = rv.get("lot_no", "").strip()
 
     return {
