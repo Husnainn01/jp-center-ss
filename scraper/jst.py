@@ -4,10 +4,6 @@ from datetime import datetime, timedelta, timezone
 
 JST = timezone(timedelta(hours=9))
 
-# After this hour (JST), today's auctions are considered finished — switch to tomorrow
-# Most Japanese car auctions run 9 AM - 12 PM JST, so by noon they're done
-CUTOFF_HOUR = 12  # 12:00 PM (noon) JST
-
 
 def now_jst() -> datetime:
     """Current time in JST."""
@@ -20,16 +16,13 @@ def today_jst():
 
 
 def should_scrape_today() -> bool:
-    """Return True if we should still scrape today's auctions (before 2 PM JST)."""
-    return now_jst().hour < CUTOFF_HOUR
+    """Always False — today's auctions are already running, can't bid on them."""
+    return False
 
 
 def get_target_date():
-    """Get the auction date we should be scraping right now.
-    Before 2 PM JST → today. After 2 PM JST → tomorrow."""
+    """Always tomorrow — today's auctions are already in progress, scrape tomorrow onwards."""
     now = now_jst()
-    if now.hour < CUTOFF_HOUR:
-        return now.date()
     return (now + timedelta(days=1)).date()
 
 

@@ -7,9 +7,9 @@ import base64
 import re
 import time
 from playwright.async_api import Page, BrowserContext
-from db import upsert_auctions, get_existing_item_ids
+from db import upsert_auctions, get_existing_item_ids, normalize_auction_date
 from storage import upload_image
-from jst import should_scrape_today, now_jst
+from jst import should_scrape_today, get_target_date, now_jst
 
 BATCH_SIZE = 20
 MAX_VEHICLES_TOTAL = 2000
@@ -230,15 +230,26 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
             else:
                 print(f"  [iauc] Batch {batch_num} p{page_num}: {len(vehicle_ids)} ({len(new_ids)} new)")
 
-            # Extract each new vehicle
+            # Extract each new vehicle (filter by target date)
+            target = get_target_date()
             vehicles = []
+            skipped_date = 0
             for vid in new_ids:
                 try:
                     v = await _extract_vehicle(page, vid, tid)
                     if v and v.get("item_id"):
+                        # Filter: skip vehicles with auction dates before target date
+                        auction_date_str = v.get("auction_date", "")
+                        auction_date = normalize_auction_date(auction_date_str, "iauc")
+                        if auction_date and auction_date < target:
+                            skipped_date += 1
+                            continue
                         vehicles.append(v)
                 except Exception as e:
                     print(f"  [iauc] Detail {vid} failed: {e}")
+
+            if skipped_date:
+                print(f"  [iauc] Batch {batch_num} p{page_num}: skipped {skipped_date} vehicles with past auction dates")
 
             if vehicles:
                 result = upsert_auctions(vehicles)

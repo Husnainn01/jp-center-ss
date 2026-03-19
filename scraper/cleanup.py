@@ -1,6 +1,7 @@
 """Cleanup expired auctions: delete R2 images first, then remove DB records."""
 
 import re
+import time
 from storage import _get_client, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY
 from db import get_expired_auctions_with_images, delete_expired_auctions
 from jst import today_jst
@@ -41,24 +42,31 @@ def delete_r2_images(keys: list[str]) -> int:
 
     client = _get_client()
     deleted = 0
+    max_retries = 3
 
-    # R2 supports batch delete up to 1000 objects at a time
-    for i in range(0, len(keys), 1000):
-        batch = keys[i:i + 1000]
-        try:
-            response = client.delete_objects(
-                Bucket=S3_BUCKET,
-                Delete={
-                    "Objects": [{"Key": k} for k in batch],
-                    "Quiet": True,
-                },
-            )
-            errors = response.get("Errors", [])
-            deleted += len(batch) - len(errors)
-            if errors:
-                print(f"  [cleanup] {len(errors)} R2 delete errors: {errors[:3]}")
-        except Exception as e:
-            print(f"  [cleanup] R2 batch delete failed: {e}")
+    # Use smaller batches (100) to avoid R2 InternalError on large deletes
+    for i in range(0, len(keys), 100):
+        batch = keys[i:i + 100]
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = client.delete_objects(
+                    Bucket=S3_BUCKET,
+                    Delete={
+                        "Objects": [{"Key": k} for k in batch],
+                        "Quiet": True,
+                    },
+                )
+                errors = response.get("Errors", [])
+                deleted += len(batch) - len(errors)
+                if errors:
+                    print(f"  [cleanup] {len(errors)} R2 delete errors: {errors[:3]}")
+                break  # success, move to next batch
+            except Exception as e:
+                if attempt < max_retries:
+                    print(f"  [cleanup] R2 batch delete failed (attempt {attempt}/{max_retries}), retrying in {attempt * 2}s...")
+                    time.sleep(attempt * 2)
+                else:
+                    print(f"  [cleanup] R2 batch delete failed after {max_retries} attempts: {e}")
 
     return deleted
 
