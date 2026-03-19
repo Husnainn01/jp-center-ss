@@ -66,7 +66,7 @@ export default function LoginPage() {
             </div>
             <div className="w-px h-8 bg-slate-700" />
             <div className="text-center">
-              <p className="text-2xl font-bold text-white">4</p>
+              <p className="text-2xl font-bold text-white">All</p>
               <p className="text-xs text-slate-400 mt-0.5">Auction Sources</p>
             </div>
             <div className="w-px h-8 bg-slate-700" />
