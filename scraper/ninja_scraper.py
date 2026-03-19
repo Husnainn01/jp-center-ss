@@ -1,6 +1,6 @@
-"""USS/NINJA scraper: maker-by-maker, JS navigation (no page.goto).
-Optimized: skip existing vehicles, parallel image uploads.
-Limits: 500 vehicles & 30 min per maker, smallest makers first."""
+"""USS/NINJA scraper: maker-by-maker, list-page extraction (no detail clicks).
+Scrapes ALL makers, ALL models, ALL vehicles. Japanese brands first.
+Splits >1000 models by body type to bypass NINJA's 1000-result limit."""
 
 import asyncio
 import base64
@@ -12,28 +12,32 @@ from db import upsert_auctions, get_existing_item_ids, normalize_auction_date
 from storage import upload_image
 from jst import should_scrape_today, get_target_date, now_jst, today_jst
 
-# Japanese makers first, foreign after — ensures JP brands get scraped
-# before time/vehicle limits kick in during daytime runs
+# Japanese makers first, foreign after — ensures JP brands get scraped first
 JAPANESE_MAKERS = [
     "TOYOTA", "LEXUS", "NISSAN", "HONDA", "MAZDA", "MITSUBISHI",
-    "SUBARU", "DAIHATSU", "SUZUKI", "ISUZU", "HINO",
+    "SUBARU", "DAIHATSU", "SUZUKI", "ISUZU", "EUNOS", "MITSUOKA",
 ]
 FOREIGN_MAKERS = [
     "MERCEDES BENZ", "BMW", "AUDI", "VOLKSWAGEN", "PORSCHE",
+    "VOLVO", "MINI", "PEUGEOT", "ALFA ROMEO",
+    "CHEVROLET", "CADILLAC", "FORD", "DODGE", "CHRYSLER JEEP",
 ]
 ALL_MAKERS = JAPANESE_MAKERS + FOREIGN_MAKERS
 
 BRAND_CODES = {
     "LEXUS": "00", "TOYOTA": "01", "NISSAN": "04", "HONDA": "06",
     "MAZDA": "10", "MITSUBISHI": "08", "SUBARU": "14", "DAIHATSU": "15",
-    "SUZUKI": "16", "ISUZU": "17", "MERCEDES BENZ": "40", "BMW": "44",
-    "AUDI": "46", "VOLKSWAGEN": "47", "PORSCHE": "49",
+    "SUZUKI": "16", "ISUZU": "17", "EUNOS": "12", "MITSUOKA": "19",
+    "MERCEDES BENZ": "40", "BMW": "44", "AUDI": "46", "VOLKSWAGEN": "47",
+    "PORSCHE": "49", "VOLVO": "90", "MINI": "56", "PEUGEOT": "81",
+    "ALFA ROMEO": "73", "CHEVROLET": "21", "CADILLAC": "20", "FORD": "29",
+    "DODGE": "33", "CHRYSLER JEEP": "32",
 }
 
-# Limits per maker — turbo settings for faster scraping
-MAX_PAGES_PER_MAKER = 40
-MAX_VEHICLES_PER_MAKER = 1000
-MAX_TIME_PER_MAKER = 3600  # 60 minutes in seconds
+# No artificial caps — scrape everything
+MAX_PAGES_PER_MAKER = 999
+MAX_VEHICLES_PER_MAKER = 99999
+MAX_TIME_PER_MAKER = 14400  # 4 hours per maker (safety only)
 
 
 async def _select_maker(page: Page, brand_code: str):
@@ -55,22 +59,6 @@ async def _select_maker(page: Page, brand_code: str):
     await asyncio.sleep(2)
 
 
-async def _get_maker_vehicle_count(page: Page, brand_code: str) -> int:
-    """Quick check: select maker and return total vehicle count."""
-    await _select_maker(page, brand_code)
-    total = await page.evaluate("""() => {
-        let total = 0;
-        document.querySelectorAll('a').forEach(a => {
-            const onclick = a.getAttribute('onclick') || '';
-            if (onclick.match(/makerListChoiceCarCat/)) {
-                const m = a.textContent.trim().match(/\\((\\d+)\\)/);
-                if (m) total += parseInt(m[1]);
-            }
-        });
-        return total;
-    }""")
-    return total
-
 
 async def ninja_search_and_extract(context: BrowserContext, makers: list[str] | None = None) -> list[str]:
     page = context.pages[0] if context.pages else await context.new_page()
@@ -85,36 +73,15 @@ async def ninja_search_and_extract(context: BrowserContext, makers: list[str] | 
     print(f"  [ninja] Target date: {target_date} ({'today + future' if scrape_today else 'tomorrow + future only'})")
     print(f"  [ninja] Current URL: {page.url[:60]}...")
     print(f"  [ninja] Makers to scrape: {', '.join(makers)}")
-    print(f"  [ninja] Limits: {MAX_VEHICLES_PER_MAKER} vehicles, {MAX_TIME_PER_MAKER//60} min per maker")
+    print(f"  [ninja] Mode: scrape ALL vehicles (no caps)")
 
     existing_ids = get_existing_item_ids("uss")
     print(f"  [ninja] {len(existing_ids)} existing vehicles in DB (will skip)")
 
-    # Pre-scan: get vehicle counts for all makers and sort smallest first
-    print(f"  [ninja] Pre-scanning maker sizes...")
-    maker_counts = []
+    # Scrape order: Japanese makers first, then foreign (defined in ALL_MAKERS)
+    print(f"  [ninja] Scrape order (JP first): {', '.join(makers)}")
+
     for maker in makers:
-        brand_code = BRAND_CODES.get(maker)
-        if not brand_code:
-            continue
-        try:
-            count = await _get_maker_vehicle_count(page, brand_code)
-            maker_counts.append((maker, count))
-            print(f"  [ninja]   {maker}: {count} vehicles")
-        except Exception as e:
-            maker_counts.append((maker, 0))
-            print(f"  [ninja]   {maker}: failed to count ({e})")
-
-    # Sort: Japanese makers first (smallest first within group), then foreign (smallest first)
-    jp_counts = [(m, c) for m, c in maker_counts if m in set(JAPANESE_MAKERS)]
-    foreign_counts = [(m, c) for m, c in maker_counts if m not in set(JAPANESE_MAKERS)]
-    jp_counts.sort(key=lambda x: x[1])
-    foreign_counts.sort(key=lambda x: x[1])
-    maker_counts = jp_counts + foreign_counts
-    sorted_makers = [m for m, _ in maker_counts]
-    print(f"  [ninja] Scrape order (JP first, smallest first): {', '.join(sorted_makers)}")
-
-    for maker in sorted_makers:
         print(f"  [ninja] Scraping {maker}...")
         try:
             ids = await _scrape_maker(page, context, maker, existing_ids)
@@ -186,13 +153,12 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
         except Exception as e:
             print(f"  [ninja] {maker} allSearch failed: {e}")
 
-    # >1000: search model by model, but limit to top models by count
-    models.sort(key=lambda m: m["count"], reverse=True)
-    top_models = models[:30]
-    print(f"  [ninja] {maker}: searching top {len(top_models)} models (of {len(models)})...")
+    # >1000: search model by model — scrape ALL models (smallest first for fast coverage)
+    models.sort(key=lambda m: m["count"])
+    print(f"  [ninja] {maker}: searching all {len(models)} models (smallest first)...")
 
     all_ids = []
-    for model in top_models:
+    for model in models:
         if model["count"] == 0:
             continue
 
@@ -242,17 +208,85 @@ async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, 
     await asyncio.sleep(3)
 
     body = await page.inner_text("body")
-    if "more than 1,000" in body.lower() or "1,000items" in body.lower():
-        print(f"  [ninja] {maker} > {model['name']}: >1000, skipping")
-        return []
+    if "more than 1,000" not in body.lower() and "1,000items" not in body.lower():
+        # Under 1000 — scrape normally
+        return await _paginate_results(page, context, maker, existing_ids, maker_start)
 
-    return await _paginate_results(page, context, maker, existing_ids, maker_start)
+    # >1000 results for this model — split by body type to get under the limit
+    print(f"  [ninja] {maker} > {model['name']}: >1000, splitting by body type...")
+
+    # Go back to maker page and re-select
+    await _select_maker(page, brand_code)
+
+    # Get available body types
+    body_types = await page.evaluate("""() => {
+        const types = [];
+        document.querySelectorAll('input[name="bodytype"]').forEach(cb => {
+            const label = cb.closest('label')?.textContent?.trim() ||
+                          cb.parentElement?.textContent?.trim() || '';
+            types.push({ value: cb.value, label: label, id: cb.id });
+        });
+        return types;
+    }""")
+
+    sub_ids = []
+    for bt in body_types:
+        if time.time() - maker_start >= MAX_TIME_PER_MAKER:
+            break
+
+        # Re-select maker
+        await _select_maker(page, brand_code)
+
+        # Uncheck all body types, then check only this one
+        await page.evaluate("""(btValue) => {
+            document.querySelectorAll('input[name="bodytype"]').forEach(cb => {
+                if (cb.checked) cb.click();
+            });
+            document.querySelectorAll('input[name="bodytype"]').forEach(cb => {
+                if (cb.value === btValue && !cb.checked) cb.click();
+            });
+        }""", bt["value"])
+        await asyncio.sleep(0.3)
+
+        # Click the model
+        await page.evaluate(f"() => makerListChoiceCarCat('{cat_id}')")
+        await page.wait_for_load_state("networkidle", timeout=30000)
+        await asyncio.sleep(2)
+
+        sub_body = await page.inner_text("body")
+        if "more than 1,000" in sub_body.lower() or "1,000items" in sub_body.lower():
+            print(f"  [ninja] {maker} > {model['name']} [{bt['label']}]: still >1000, scraping what we can")
+
+        ids = await _paginate_results(page, context, maker, existing_ids, maker_start)
+        sub_ids.extend(ids)
+        if ids:
+            print(f"  [ninja] {maker} > {model['name']} [{bt['label']}]: {len(ids)} vehicles")
+
+    return sub_ids
 
 
 async def _paginate_results(page: Page, context: BrowserContext, maker: str, existing_ids: set, maker_start: float) -> list[str]:
-    """Paginate through results. Enforces page, vehicle, and time limits."""
+    """Paginate through results, extracting data directly from the list page.
+    No detail page clicks needed — all fields + thumbnail extracted in one JS call per page."""
     all_ids = []
     page_num = 0
+
+    # Switch to 100 items per page for fewer page loads
+    await page.evaluate("""() => {
+        const links = document.querySelectorAll('a');
+        for (const a of links) {
+            if (a.textContent.trim() === '100' && a.getAttribute('onclick')
+                && a.getAttribute('onclick').includes('changeDisp')) {
+                a.click(); return true;
+            }
+        }
+        return false;
+    }""")
+    try:
+        await page.wait_for_load_state("networkidle", timeout=15000)
+    except:
+        pass
+    await asyncio.sleep(2)
 
     while page_num < MAX_PAGES_PER_MAKER:
         # Check time and vehicle limits
@@ -265,67 +299,168 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
 
         page_num += 1
 
-        vehicle_params = await page.evaluate("""() => {
-            const params = [];
-            const els = document.querySelectorAll('[onclick*=seniCarDetail]');
+        # Extract ALL vehicle data from the list page in a single JS call
+        raw_vehicles = await page.evaluate("""() => {
+            const results = [];
+            const rows = document.querySelectorAll('tr');
             const seen = new Set();
-            for (const el of els) {
-                const onclick = el.getAttribute('onclick') || '';
+
+            for (const row of rows) {
+                // Find seniCarDetail onclick in this row
+                const detailLink = row.querySelector('[onclick*=seniCarDetail]');
+                if (!detailLink) continue;
+
+                const onclick = detailLink.getAttribute('onclick') || '';
                 const match = onclick.match(/seniCarDetail\\('(\\d+)',\\s*'([^']*)',\\s*'([^']*)',\\s*'([^']*)',\\s*'([^']*)'/);
-                if (match) {
-                    const key = match[4];
-                    if (!seen.has(key)) {
-                        seen.add(key);
-                        params.push({ index: match[1], site: match[2], times: match[3], bidNo: match[4], extra: match[5] });
-                    }
-                }
+                if (!match) continue;
+
+                const bidNo = match[4];
+                if (seen.has(bidNo)) continue;
+                seen.add(bidNo);
+
+                // Get all td cells text
+                const cells = Array.from(row.querySelectorAll('td')).map(td => td.innerText.trim());
+
+                // Get thumbnail image URL
+                const img = row.querySelector('img[src*=get_car_image], img[src*=get_image]');
+                const imgSrc = img ? img.src : '';
+
+                // Get carKeyStr hidden input for image path
+                const keyInput = row.querySelector('input[name^=carKeyStr]');
+                const keyVal = keyInput ? keyInput.value : '';
+
+                results.push({
+                    index: match[1],
+                    site: match[2],
+                    times: match[3],
+                    bidNo: bidNo,
+                    cells: cells,
+                    imgSrc: imgSrc,
+                    keyVal: keyVal,
+                });
             }
-            return params;
+            return results;
         }""")
 
-        if not vehicle_params:
+        if not raw_vehicles:
             break
 
         # Skip existing
-        new_params = []
+        target = get_target_date()
+        new_vehicles = []
         skipped = 0
-        for vp in vehicle_params:
-            item_id = f"uss-{vp['bidNo']}-{vp['times']}"
+        skipped_date = 0
+        for rv in raw_vehicles:
+            item_id = f"uss-{rv['bidNo']}-{rv['times']}"
             if item_id in existing_ids:
                 skipped += 1
                 all_ids.append(item_id)
-            else:
-                new_params.append(vp)
+                continue
 
-        print(f"  [ninja] {maker} p{page_num}: {len(vehicle_params)} vehicles ({skipped} existing, {len(new_params)} new)")
+            # Parse vehicle data from cells
+            vehicle = _parse_list_row(rv, maker)
+            if not vehicle or not vehicle.get("item_id"):
+                continue
 
-        # Extract new vehicles (filter by target date)
-        target = get_target_date()
-        vehicles = []
-        skipped_date = 0
-        for vp in new_params:
-            try:
-                v = await _extract_vehicle_detail(page, context, vp, maker)
-                if v and v.get("item_id"):
-                    # Filter: skip vehicles with auction dates before target date
-                    auction_date_str = v.get("auction_date", "")
-                    auction_date = normalize_auction_date(auction_date_str, "uss")
-                    if auction_date and auction_date < target:
-                        skipped_date += 1
-                        continue
-                    vehicles.append(v)
-            except Exception as e:
-                print(f"  [ninja] Detail failed: {e}")
+            # Filter by target date
+            auction_date_str = vehicle.get("auction_date", "")
+            auction_date = normalize_auction_date(auction_date_str, "uss")
+            if auction_date and auction_date < target:
+                skipped_date += 1
+                continue
+
+            new_vehicles.append((vehicle, rv.get("imgSrc", "")))
+
+        print(f"  [ninja] {maker} p{page_num}: {len(raw_vehicles)} vehicles ({skipped} existing, {len(new_vehicles)} new)")
 
         if skipped_date:
             print(f"  [ninja] {maker} p{page_num}: skipped {skipped_date} vehicles with past auction dates")
 
-        if vehicles:
-            result = upsert_auctions(vehicles)
-            all_ids.extend(v["item_id"] for v in vehicles)
-            existing_ids.update(v["item_id"] for v in vehicles)
-            img_total = sum(len(v.get("images", [])) for v in vehicles)
-            print(f"  [ninja] {maker} p{page_num}: {len(vehicles)} → DB (new:{result['new']}, imgs:{img_total})")
+        # Fetch exhibit sheets via new-tab form submission + upload thumbnails
+        if new_vehicles:
+            # Step 1: Get exhibit sheet URLs by submitting form1 to new tabs
+            sheet_urls = {}
+            for vehicle, _ in new_vehicles:
+                rv_match = next((rv for rv in raw_vehicles if rv['bidNo'] == vehicle['lot_number']), None)
+                if not rv_match:
+                    continue
+                try:
+                    new_page_promise = context.wait_for_event("page", timeout=10000)
+                    await page.evaluate("""(v) => {
+                        document.getElementById('carKindType').value = '1';
+                        document.getElementById('kaijoCode').value = v.site;
+                        document.getElementById('auctionCount').value = v.times;
+                        document.getElementById('bidNo').value = v.bidNo;
+                        document.getElementById('zaikoNo').value = '';
+                        document.getElementById('action').value = 'init';
+                        var form = document.getElementById('form1');
+                        form.setAttribute('action', './cardetail.action');
+                        form.setAttribute('target', '_blank');
+                        form.submit();
+                    }""", rv_match)
+                    detail_page = await new_page_promise
+                    await detail_page.wait_for_load_state("networkidle", timeout=10000)
+                    await asyncio.sleep(0.5)
+
+                    sheet_url = await detail_page.evaluate("""() => {
+                        for (const img of document.querySelectorAll('img')) {
+                            if (img.src && img.src.includes('get_ex_image')) return img.src;
+                        }
+                        return '';
+                    }""")
+                    if sheet_url:
+                        sheet_urls[vehicle['item_id']] = sheet_url
+                    await detail_page.close()
+                except Exception as e:
+                    # Close any extra pages that may have opened
+                    for p in context.pages[1:]:
+                        try:
+                            await p.close()
+                        except:
+                            pass
+
+            # Reset form target
+            await page.evaluate("() => document.getElementById('form1').setAttribute('target', '')")
+
+            if sheet_urls:
+                print(f"  [ninja] {maker} p{page_num}: found {len(sheet_urls)} exhibit sheets")
+
+            # Step 2: Upload thumbnails + exhibit sheets in parallel
+            async def upload_one(url):
+                if not url:
+                    return None
+                return await _download_and_upload(page, url, "ninja-images")
+
+            # Build upload tasks: thumbnail + sheet for each vehicle
+            upload_tasks = []
+            task_map = []  # track which task belongs to which vehicle
+            for i, (vehicle, img_url) in enumerate(new_vehicles):
+                upload_tasks.append(upload_one(img_url))
+                task_map.append(('thumb', i))
+                sheet_url = sheet_urls.get(vehicle['item_id'], '')
+                upload_tasks.append(upload_one(sheet_url))
+                task_map.append(('sheet', i))
+
+            upload_results = await asyncio.gather(*upload_tasks, return_exceptions=True)
+
+            vehicles_to_save = []
+            for i, (vehicle, _) in enumerate(new_vehicles):
+                thumb_idx = i * 2
+                sheet_idx = i * 2 + 1
+                thumb = upload_results[thumb_idx] if not isinstance(upload_results[thumb_idx], Exception) else None
+                sheet = upload_results[sheet_idx] if not isinstance(upload_results[sheet_idx], Exception) else None
+                vehicle["images"] = [thumb] if thumb else []
+                vehicle["image_url"] = thumb
+                vehicle["exhibit_sheet"] = sheet
+                vehicles_to_save.append(vehicle)
+
+            if vehicles_to_save:
+                result = upsert_auctions(vehicles_to_save)
+                all_ids.extend(v["item_id"] for v in vehicles_to_save)
+                existing_ids.update(v["item_id"] for v in vehicles_to_save)
+                img_total = sum(len(v.get("images", [])) for v in vehicles_to_save)
+                sheet_total = sum(1 for v in vehicles_to_save if v.get("exhibit_sheet"))
+                print(f"  [ninja] {maker} p{page_num}: {len(vehicles_to_save)} → DB (new:{result['new']}, imgs:{img_total}, sheets:{sheet_total})")
 
         # Next page
         has_next = await page.evaluate("""() => {
@@ -336,7 +471,7 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
         if not has_next:
             break
         await page.wait_for_load_state("networkidle", timeout=30000)
-        await asyncio.sleep(3)
+        await asyncio.sleep(2)
 
     if page_num >= MAX_PAGES_PER_MAKER:
         print(f"  [ninja] {maker}: reached page limit ({MAX_PAGES_PER_MAKER}), moving to next maker")
@@ -344,131 +479,97 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
     return all_ids
 
 
-async def _extract_vehicle_detail(page: Page, context: BrowserContext, params: dict, maker: str) -> dict | None:
-    """Open vehicle detail on main page, extract data + images."""
-    try:
-        idx, site, times, bid_no = params["index"], params["site"], params["times"], params["bidNo"]
-
-        await page.evaluate(f"() => seniCarDetail('{idx}', '{site}', '{times}', '{bid_no}', '')")
-        await page.wait_for_load_state("networkidle", timeout=15000)
-        await asyncio.sleep(1)
-
-        text = await page.inner_text("body")
-
-        imgs_data = await page.evaluate("""() => {
-            const car = [];
-            const sheet = [];
-            const seen = new Set();
-            document.querySelectorAll('img').forEach(img => {
-                if (!img.src || !img.src.startsWith('http') || seen.has(img.src)) return;
-                seen.add(img.src);
-                if (img.src.includes('get_ex_image')) sheet.push(img.src);
-                else if (img.src.includes('get_image') || img.src.includes('get_car_image')) car.push(img.src);
-            });
-            return { car, sheet };
-        }""")
-
-        # Parallel upload
-        async def upload_one(url):
-            return await _download_and_upload(page, url, "ninja-images")
-
-        car_tasks = [upload_one(url) for url in imgs_data.get("car", [])]
-        car_results = await asyncio.gather(*car_tasks) if car_tasks else []
-        car_images = [r for r in car_results if r]
-
-        exhibit_sheet = None
-        for url in imgs_data.get("sheet", []):
-            path = await _download_and_upload(page, url, "ninja-images")
-            if path:
-                exhibit_sheet = path
-                break
-
-        vehicle = _parse_detail_text(text, maker, site, bid_no, times)
-        vehicle["images"] = car_images
-        vehicle["image_url"] = car_images[0] if car_images else None
-        vehicle["exhibit_sheet"] = exhibit_sheet
-
-        # Go back
-        await page.evaluate("""() => {
-            const links = document.querySelectorAll('a');
-            for (const a of links) {
-                if (a.textContent.trim() === 'Back to the list') { a.click(); return; }
-            }
-            history.back();
-        }""")
-        await page.wait_for_load_state("networkidle", timeout=15000)
-        await asyncio.sleep(1)
-
-        return vehicle
-
-    except Exception as e:
-        try:
-            await page.go_back()
-            await page.wait_for_load_state("networkidle", timeout=10000)
-            await asyncio.sleep(1)
-        except:
-            pass
+def _parse_list_row(rv: dict, maker: str) -> dict | None:
+    """Parse vehicle data from list page row cells.
+    Cell layout: [0] site/date/lotNo [1] maker/model/chassis [2] year [3] trans/cc [4] mileage [5] score [6] price/status"""
+    cells = rv.get("cells", [])
+    if len(cells) < 6:
         return None
 
+    # Cell 0: site, date, lot number
+    cell0_lines = [l.strip() for l in cells[0].split("\n") if l.strip()]
+    site_name = cell0_lines[0] if cell0_lines else ""
+    auction_date = ""
+    lot_no = rv["bidNo"]
+    for line in cell0_lines:
+        date_match = re.search(r'(\d{4}/\d{2}/\d{2})', line)
+        if date_match:
+            auction_date = date_match.group(1)
+        no_match = re.search(r'No\.(\d+)', line)
+        if no_match:
+            lot_no = no_match.group(1)
 
-def _parse_detail_text(text: str, maker: str, site: str, bid_no: str, times: str) -> dict:
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
-
+    # Cell 1: maker, model, grade, chassis
+    cell1_lines = [l.strip() for l in cells[1].split("\n") if l.strip()]
     model = ""
     grade = ""
-    for line in lines:
-        if maker in line and len(line) < 100:
-            parts = line.replace(maker, "").strip().split()
-            model = parts[0] if parts else ""
+    chassis = ""
+    for line in cell1_lines:
+        if line == maker:
+            continue
+        if not model:
+            # First non-maker line is model + grade
+            parts = line.split()
+            model = parts[0] if parts else line
             grade = " ".join(parts[1:]) if len(parts) > 1 else ""
-            break
+        else:
+            # Next line is chassis code (full-width chars)
+            chassis = line
 
-    def find_field(label):
-        for i, line in enumerate(lines):
-            if line.startswith(label) or line == label:
-                rest = line.replace(label, "").strip()
-                if rest: return rest
-                if i + 1 < len(lines): return lines[i + 1]
-        return None
+    # Cell 2: year
+    year = cells[2].strip() if len(cells) > 2 else ""
 
-    year_match = re.search(r'\b(20\d{2})\b', text[:500])
-    date_match = re.search(r'(\d{4}/\d{2}/\d{2})', text)
-    price_match = re.search(r'(?:Start|JPY)\s*([\d,]+)', text)
-    mileage_match = re.search(r'(\d[\d,]*)\s*km', text, re.IGNORECASE)
-    cc_match = re.search(r'([\d,]+)\s*cc', text, re.IGNORECASE)
-    score_match = re.search(r'Inspection score\s*([^\n]+)', text)
+    # Cell 3: transmission + cc
+    cell3_lines = [l.strip() for l in cells[3].split("\n") if l.strip()]
+    cc = ""
+    for line in cell3_lines:
+        cc_match = re.search(r'([\d,]+)\s*cc', line, re.IGNORECASE)
+        if cc_match:
+            cc = cc_match.group(0)
 
-    chassis = find_field("Type") or ""
-    color = find_field("Body color") or ""
+    # Cell 4: mileage
+    mileage = cells[4].strip() if len(cells) > 4 else ""
 
-    price_raw = price_match.group(1).replace(",", "") if price_match else None
-    start_price = str(int(price_raw) / 10000) if price_raw else None
+    # Cell 5: score
+    score = cells[5].strip() if len(cells) > 5 else ""
 
-    item_id = f"uss-{bid_no}-{date_match.group(1).replace('/', '') if date_match else times}"
+    # Cell 6: price + status
+    start_price = None
+    if len(cells) > 6:
+        price_match = re.search(r'JPY\s*([\d,]+)', cells[6])
+        if price_match:
+            price_raw = price_match.group(1).replace(",", "")
+            try:
+                start_price = str(int(price_raw) / 10000)
+            except ValueError:
+                pass
+
+    item_id = f"uss-{rv['bidNo']}-{auction_date.replace('/', '') if auction_date else rv['times']}"
 
     return {
         "item_id": item_id,
-        "lot_number": bid_no,
+        "lot_number": lot_no,
         "maker": maker,
         "model": model,
         "grade": grade or None,
-        "chassis_code": chassis.strip() if chassis else None,
-        "engine_specs": cc_match.group(0) if cc_match else None,
-        "year": year_match.group(1) if year_match else None,
-        "mileage": mileage_match.group(0) if mileage_match else None,
+        "chassis_code": chassis or None,
+        "engine_specs": cc or None,
+        "year": year or None,
+        "mileage": mileage or None,
         "inspection_expiry": None,
-        "color": color.strip() if color else None,
-        "rating": score_match.group(1).strip() if score_match else None,
+        "color": None,
+        "rating": score if score != "***" else None,
         "start_price": start_price,
-        "auction_date": date_match.group(1) if date_match else "",
-        "auction_house": f"USS {site}".strip(),
-        "location": site or "USS",
+        "auction_date": auction_date,
+        "auction_house": f"USS {site_name}".strip(),
+        "location": site_name or "USS",
         "status": "upcoming",
         "image_url": None,
         "images": [],
         "exhibit_sheet": None,
         "source": "uss",
     }
+
 
 
 async def _download_and_upload(page: Page, url: str, prefix: str) -> str | None:
