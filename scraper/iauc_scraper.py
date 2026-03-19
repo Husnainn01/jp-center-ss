@@ -4,6 +4,7 @@ Limits: 500 vehicles & 30 min per batch cycle, smallest models first."""
 
 import asyncio
 import base64
+import os
 import re
 import time
 from playwright.async_api import Page, BrowserContext
@@ -11,10 +12,78 @@ from db import upsert_auctions, get_existing_item_ids, normalize_auction_date
 from storage import upload_image
 from jst import should_scrape_today, get_target_date, now_jst
 
-BATCH_SIZE = 20
-MAX_VEHICLES_TOTAL = 2000
-MAX_TIME_TOTAL = 5400  # 90 minutes total
-MAX_RESULTS_PER_BATCH = 200  # Don't paginate forever within one batch
+# ── Mode switch ─────────────────────────────────────────────────────────────
+# Set IAUC_OVERNIGHT=true in env to enable full overnight pass.
+# run_iauc.py sets this automatically via the 11pm JST cron job.
+OVERNIGHT_MODE = os.getenv("IAUC_OVERNIGHT", "false").lower() == "true"
+
+# ── Japanese makers (scraped first in daytime mode) ──────────────────────────
+JAPANESE_MAKERS = {
+    "TOYOTA", "LEXUS", "NISSAN", "HONDA", "MAZDA",
+    "MITSUBISHI", "SUBARU", "DAIHATSU", "SUZUKI",
+    "ISUZU", "HINO",
+}
+
+# ── Limits (overnight vs daytime delta) ─────────────────────────────────────
+BATCH_SIZE           = 50    if OVERNIGHT_MODE else 40    # models per batch
+MAX_VEHICLES_TOTAL   = 99999 if OVERNIGHT_MODE else 5000  # no cap overnight
+MAX_TIME_TOTAL       = 28800 if OVERNIGHT_MODE else 10800 # 8 hrs vs 3 hrs
+MAX_RESULTS_PER_BATCH = 500  if OVERNIGHT_MODE else 400   # pagination depth
+CONCURRENT_TABS      = 15   if OVERNIGHT_MODE else 8      # parallel extractions
+
+
+async def _select_makers(page: Page, maker_names: set[str] | None = None):
+    """Select makers on the Make & Model page.
+    maker_names=None → select all makers (overnight behavior).
+    maker_names=set  → select only makers whose label matches."""
+    if maker_names is None:
+        # Click both "All" buttons (Japanese + Imported sections)
+        await page.evaluate("""() => {
+            const allBtns = Array.from(document.querySelectorAll('button'))
+                .filter(b => b.textContent.trim() === 'All' && b.offsetParent !== null);
+            allBtns.forEach(b => b.click());
+        }""")
+        await asyncio.sleep(2)
+        # Fallback: click each maker via mouse
+        makers_checked = await page.evaluate('() => document.querySelectorAll(\'input[name="maker[]"]:checked\').length')
+        if makers_checked == 0:
+            print("  [iauc] All buttons didn't work, clicking makers manually...")
+            maker_boxes = await page.evaluate("""() => {
+                return Array.from(document.querySelectorAll('li.search-maker-checkbox')).map(li => {
+                    const r = li.getBoundingClientRect();
+                    return { text: li.textContent.trim(), x: r.x + r.width/2, y: r.y + r.height/2, visible: r.y > 0 };
+                }).filter(m => m.visible);
+            }""")
+            for m in maker_boxes:
+                await page.mouse.click(m['x'], m['y'])
+                await asyncio.sleep(0.2)
+    else:
+        # First uncheck all makers
+        await page.evaluate("""() => {
+            document.querySelectorAll('input[name="maker[]"]:checked').forEach(inp => inp.click());
+        }""")
+        await asyncio.sleep(0.5)
+        # Click only makers whose text matches the filter set
+        maker_boxes = await page.evaluate("""() => {
+            return Array.from(document.querySelectorAll('li.search-maker-checkbox')).map(li => {
+                const r = li.getBoundingClientRect();
+                return { text: li.textContent.trim(), x: r.x + r.width/2, y: r.y + r.height/2, visible: r.y > 0 };
+            }).filter(m => m.visible);
+        }""")
+        clicked = 0
+        for m in maker_boxes:
+            # Match maker name: the li text may include count, e.g. "TOYOTA (123)"
+            label = m['text'].split('(')[0].strip().upper()
+            if label in maker_names:
+                await page.mouse.click(m['x'], m['y'])
+                await asyncio.sleep(0.2)
+                clicked += 1
+        print(f"  [iauc] Clicked {clicked} makers matching filter")
+
+    await asyncio.sleep(2)
+    makers_checked = await page.evaluate('() => document.querySelectorAll(\'input[name="maker[]"]:checked\').length')
+    print(f"  [iauc] {makers_checked} makers selected")
+    return makers_checked
 
 
 async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[str]:
@@ -40,8 +109,9 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     await page.click("a.title-button.checkbox_on_all")
     await asyncio.sleep(1)
 
-    # After 2 PM JST: uncheck Today (auctions finished, switch to tomorrow)
-    # Before 2 PM JST: keep Today checked (still active auctions)
+    # should_scrape_today() is always True so this block never runs.
+    # Today's checkbox stays checked — we always include today's upcoming auctions.
+    # After midnight JST, today_jst() rolls naturally to the next day.
     if not scrape_today:
         days = await page.evaluate("""() => {
             return Array.from(document.querySelectorAll('button.day-button')).map(btn => {
@@ -78,230 +148,244 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     search_base_url = page.url.split("#")[0]
     print(f"  [iauc] Search URL saved: {search_base_url[:60]}...")
 
-    # === Step 3: Select ALL Japanese + Imported makers ===
-    print("  [iauc] Selecting all makers...")
-    await page.evaluate("""() => {
-        const allBtns = Array.from(document.querySelectorAll('button'))
-            .filter(b => b.textContent.trim() === 'All' && b.offsetParent !== null);
-        allBtns.forEach(b => b.click());
-    }""")
-    await asyncio.sleep(2)
+    # === Step 3+4+5: Two-pass maker strategy ===
+    # Overnight: one pass with all makers
+    # Daytime: Pass 1 = Japanese makers only, Pass 2 = all makers (existing_ids skips dupes)
+    if OVERNIGHT_MODE:
+        maker_passes = [(None, "All makers")]
+    else:
+        maker_passes = [
+            (JAPANESE_MAKERS, "Japanese makers"),
+            (None, "All makers (foreign + remaining)"),
+        ]
 
-    # Fallback: click each maker via mouse
-    makers_checked = await page.evaluate('() => document.querySelectorAll(\'input[name="maker[]"]:checked\').length')
-    if makers_checked == 0:
-        print("  [iauc] All buttons didn't work, clicking makers manually...")
-        maker_boxes = await page.evaluate("""() => {
-            return Array.from(document.querySelectorAll('li.search-maker-checkbox')).map(li => {
-                const r = li.getBoundingClientRect();
-                return { text: li.textContent.trim(), x: r.x + r.width/2, y: r.y + r.height/2, visible: r.y > 0 };
-            }).filter(m => m.visible);
-        }""")
-        for m in maker_boxes:
-            await page.mouse.click(m['x'], m['y'])
-            await asyncio.sleep(0.2)
-
-    await asyncio.sleep(3)
-    makers_checked = await page.evaluate('() => document.querySelectorAll(\'input[name="maker[]"]:checked\').length')
-    print(f"  [iauc] {makers_checked} makers selected")
-
-    # === Step 4: Get all models, sort smallest first ===
-    models = await page.evaluate("""() => {
-        const items = [];
-        document.querySelectorAll('input[name="type[]"]').forEach((inp, idx) => {
-            const name = inp.getAttribute('data-name') || '';
-            const cnt = parseInt(inp.getAttribute('data-cnt') || '0');
-            if (cnt > 0) {
-                items.push({ name, cnt, idx });
-            }
-        });
-        // Sort smallest first so small models get scraped before time runs out
-        items.sort((a, b) => a.cnt - b.cnt);
-        return items;
-    }""")
-
-    total_cars = sum(m['cnt'] for m in models)
-    print(f"  [iauc] {len(models)} models, {total_cars} total vehicles (sorted smallest first)")
-    print(f"  [iauc] Limits: {MAX_VEHICLES_TOTAL} vehicles, {MAX_TIME_TOTAL // 60} min total")
-
-    if total_cars == 0:
-        return []
-
-    # === Step 5: Batch models, search each batch ===
     all_ids = []
 
-    for batch_start in range(0, len(models), BATCH_SIZE):
-        # Check global limits
+    for pass_idx, (maker_filter, pass_label) in enumerate(maker_passes):
+        # Check limits before starting a new pass
         elapsed = time.time() - scrape_start
-        if elapsed >= MAX_TIME_TOTAL:
-            print(f"  [iauc] Time limit reached ({elapsed/60:.1f} min), stopping")
-            break
         if len(all_ids) >= MAX_VEHICLES_TOTAL:
-            print(f"  [iauc] Vehicle limit reached ({len(all_ids)}/{MAX_VEHICLES_TOTAL}), stopping")
+            print(f"  [iauc] Vehicle limit reached ({len(all_ids)}/{MAX_VEHICLES_TOTAL}), skipping pass {pass_idx + 1}")
+            break
+        if elapsed >= MAX_TIME_TOTAL:
+            print(f"  [iauc] Time limit reached ({elapsed/60:.1f} min), skipping pass {pass_idx + 1}")
             break
 
-        batch = models[batch_start:batch_start + BATCH_SIZE]
-        batch_num = batch_start // BATCH_SIZE + 1
-        batch_total = sum(m['cnt'] for m in batch)
-        batch_names = [m['name'] for m in batch[:3]]
+        print(f"  [iauc] ── Pass {pass_idx + 1}: {pass_label} ──")
 
-        print(f"  [iauc] Batch {batch_num}: {len(batch)} models ({batch_total} vehicles) [{', '.join(batch_names)}...]")
+        # On pass 2+, reload the maker page
+        if pass_idx > 0:
+            search_url = search_base_url + "#maker"
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+            await asyncio.sleep(3)
 
-        # Clear previous model selection via JS
-        await page.evaluate("""() => {
-            document.querySelectorAll('input[name="type[]"]:checked').forEach(inp => inp.click());
-        }""")
-        await asyncio.sleep(0.5)
+        # Select makers for this pass
+        await _select_makers(page, maker_filter)
 
-        # Select models in this batch via JS checkbox click (not mouse — works off-screen)
-        batch_indices = [m['idx'] for m in batch]
-        await page.evaluate("""(indices) => {
-            const inputs = document.querySelectorAll('input[name="type[]"]');
-            indices.forEach(idx => {
-                if (inputs[idx] && !inputs[idx].checked) inputs[idx].click();
-            });
-        }""", batch_indices)
-        await asyncio.sleep(1)
-
-        # Enable and click Next
-        await page.evaluate('() => { var b = document.querySelector("#next-bottom"); if (b) { b.disabled = false; b.click(); } }')
-        try:
-            await page.wait_for_load_state("networkidle", timeout=15000)
-        except:
-            pass
-        await asyncio.sleep(8)
-
-        # Get __tid
-        tid = await page.evaluate("""() => {
-            for (const a of document.querySelectorAll('a[href*="__tid"]')) {
-                const m = a.href.match(/__tid=([^&#]+)/);
-                if (m) return m[1];
-            }
-            return '';
-        }""")
-
-        # Wait for vehicle images
-        for _ in range(10):
-            cnt = await page.evaluate("() => document.querySelectorAll('img[data-code]').length")
-            if cnt > 0:
-                break
-            await asyncio.sleep(2)
-
-        # Paginate through results for this batch
-        batch_ids = []
-        page_num = 0
-        while True:
-            page_num += 1
-
-            # Check limits
-            if len(all_ids) + len(batch_ids) >= MAX_VEHICLES_TOTAL:
-                break
-            if time.time() - scrape_start >= MAX_TIME_TOTAL:
-                break
-            if len(batch_ids) >= MAX_RESULTS_PER_BATCH:
-                print(f"  [iauc] Batch {batch_num}: result limit reached ({len(batch_ids)})")
-                break
-
-            # Get vehicle IDs on current page (short format only: XX-XXXX-XXXX)
-            vehicle_ids = await page.evaluate("""() => {
-                const items = [];
-                const seen = new Set();
-                document.querySelectorAll('img[data-code]').forEach(img => {
-                    const code = img.getAttribute('data-code');
-                    if (!code) return;
-                    // Only use short codes (3 parts). Long codes (6 parts) return "Not Found" on detail page
-                    const parts = code.split('-');
-                    const shortCode = parts.length > 3 ? parts.slice(0, 3).join('-') : code;
-                    if (!seen.has(shortCode)) {
-                        seen.add(shortCode);
-                        items.push(shortCode);
-                    }
-                });
-                return items;
-            }""")
-
-            if not vehicle_ids:
-                break
-
-            new_ids = [vid for vid in vehicle_ids if f"iauc-{vid}" not in existing_ids]
-            skipped = len(vehicle_ids) - len(new_ids)
-            if page_num == 1:
-                print(f"  [iauc] Batch {batch_num} p{page_num}: {len(vehicle_ids)} on page ({len(new_ids)} new, {skipped} existing)")
-            else:
-                print(f"  [iauc] Batch {batch_num} p{page_num}: {len(vehicle_ids)} ({len(new_ids)} new)")
-
-            # Extract each new vehicle (filter by target date)
-            target = get_target_date()
-            vehicles = []
-            skipped_date = 0
-            for vid in new_ids:
-                try:
-                    v = await _extract_vehicle(page, vid, tid)
-                    if v and v.get("item_id"):
-                        # Filter: skip vehicles with auction dates before target date
-                        auction_date_str = v.get("auction_date", "")
-                        auction_date = normalize_auction_date(auction_date_str, "iauc")
-                        if auction_date and auction_date < target:
-                            skipped_date += 1
-                            continue
-                        vehicles.append(v)
-                except Exception as e:
-                    print(f"  [iauc] Detail {vid} failed: {e}")
-
-            if skipped_date:
-                print(f"  [iauc] Batch {batch_num} p{page_num}: skipped {skipped_date} vehicles with past auction dates")
-
-            if vehicles:
-                result = upsert_auctions(vehicles)
-                all_ids.extend(v["item_id"] for v in vehicles)
-                existing_ids.update(v["item_id"] for v in vehicles)
-                img_total = sum(len(v.get("images", [])) for v in vehicles)
-                print(f"  [iauc] Batch {batch_num} p{page_num}: {len(vehicles)} → DB (new:{result['new']}, imgs:{img_total})")
-
-            # Track all IDs (including skipped existing)
-            for vid in vehicle_ids:
-                item_id = f"iauc-{vid}"
-                if item_id not in batch_ids:
-                    batch_ids.append(item_id)
-
-            # Try next page
-            has_next = await page.evaluate("""() => {
-                const links = document.querySelectorAll('a');
-                for (const a of links) {
-                    if (a.textContent.trim() === 'Next' && a.getAttribute('onclick') && a.getAttribute('onclick').includes('get_carlist')) {
-                        a.click();
-                        return true;
-                    }
+        # Get all models, sort smallest first
+        models = await page.evaluate("""() => {
+            const items = [];
+            document.querySelectorAll('input[name="type[]"]').forEach((inp, idx) => {
+                const name = inp.getAttribute('data-name') || '';
+                const cnt = parseInt(inp.getAttribute('data-cnt') || '0');
+                if (cnt > 0) {
+                    items.push({ name, cnt, idx });
                 }
-                return false;
-            }""")
-            if not has_next:
-                break
-            await asyncio.sleep(5)
+            });
+            items.sort((a, b) => a.cnt - b.cnt);
+            return items;
+        }""")
 
-            # Wait for new results to load
+        total_cars = sum(m['cnt'] for m in models)
+        print(f"  [iauc] Pass {pass_idx + 1}: {len(models)} models, {total_cars} total vehicles (sorted smallest first)")
+        print(f"  [iauc] Limits: {MAX_VEHICLES_TOTAL} vehicles, {MAX_TIME_TOTAL // 60} min total")
+
+        if total_cars == 0:
+            print(f"  [iauc] Pass {pass_idx + 1}: no vehicles, moving on")
+            continue
+
+        # Batch models, search each batch
+        for batch_start in range(0, len(models), BATCH_SIZE):
+            # Check global limits
+            elapsed = time.time() - scrape_start
+            if elapsed >= MAX_TIME_TOTAL:
+                print(f"  [iauc] Time limit reached ({elapsed/60:.1f} min), stopping")
+                break
+            if len(all_ids) >= MAX_VEHICLES_TOTAL:
+                print(f"  [iauc] Vehicle limit reached ({len(all_ids)}/{MAX_VEHICLES_TOTAL}), stopping")
+                break
+
+            batch = models[batch_start:batch_start + BATCH_SIZE]
+            batch_num = batch_start // BATCH_SIZE + 1
+            batch_total = sum(m['cnt'] for m in batch)
+            batch_names = [m['name'] for m in batch[:3]]
+
+            print(f"  [iauc] P{pass_idx + 1} Batch {batch_num}: {len(batch)} models ({batch_total} vehicles) [{', '.join(batch_names)}...]")
+
+            # Clear previous model selection via JS
+            await page.evaluate("""() => {
+                document.querySelectorAll('input[name="type[]"]:checked').forEach(inp => inp.click());
+            }""")
+            await asyncio.sleep(0.5)
+
+            # Select models in this batch via JS checkbox click (not mouse — works off-screen)
+            batch_indices = [m['idx'] for m in batch]
+            await page.evaluate("""(indices) => {
+                const inputs = document.querySelectorAll('input[name="type[]"]');
+                indices.forEach(idx => {
+                    if (inputs[idx] && !inputs[idx].checked) inputs[idx].click();
+                });
+            }""", batch_indices)
+            await asyncio.sleep(1)
+
+            # Enable and click Next
+            await page.evaluate('() => { var b = document.querySelector("#next-bottom"); if (b) { b.disabled = false; b.click(); } }')
+            try:
+                await page.wait_for_load_state("networkidle", timeout=15000)
+            except:
+                pass
+            await asyncio.sleep(4)
+
+            # Get __tid
+            tid = await page.evaluate("""() => {
+                for (const a of document.querySelectorAll('a[href*="__tid"]')) {
+                    const m = a.href.match(/__tid=([^&#]+)/);
+                    if (m) return m[1];
+                }
+                return '';
+            }""")
+
+            # Wait for vehicle images
             for _ in range(10):
                 cnt = await page.evaluate("() => document.querySelectorAll('img[data-code]').length")
                 if cnt > 0:
                     break
-                await asyncio.sleep(2)
+                await asyncio.sleep(1)
 
-        # Add batch IDs to total
-        for bid in batch_ids:
-            if bid not in all_ids:
-                all_ids.append(bid)
+            # Paginate through results for this batch
+            batch_ids = []
+            page_num = 0
+            while True:
+                page_num += 1
 
-        # Reload Make & Model page fresh for next batch
-        search_url = search_base_url + "#maker"
-        await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
-        await asyncio.sleep(5)
-        # Re-select all makers
-        await page.evaluate("""() => {
-            const allBtns = Array.from(document.querySelectorAll('button'))
-                .filter(b => b.textContent.trim() === 'All' && b.offsetParent !== null);
-            allBtns.forEach(b => b.click());
-        }""")
-        await asyncio.sleep(3)
+                # Check limits
+                if len(all_ids) + len(batch_ids) >= MAX_VEHICLES_TOTAL:
+                    break
+                if time.time() - scrape_start >= MAX_TIME_TOTAL:
+                    break
+                if len(batch_ids) >= MAX_RESULTS_PER_BATCH:
+                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num}: result limit reached ({len(batch_ids)})")
+                    break
+
+                # Get vehicle IDs on current page (short format only: XX-XXXX-XXXX)
+                vehicle_ids = await page.evaluate("""() => {
+                    const items = [];
+                    const seen = new Set();
+                    document.querySelectorAll('img[data-code]').forEach(img => {
+                        const code = img.getAttribute('data-code');
+                        if (!code) return;
+                        // Only use short codes (3 parts). Long codes (6 parts) return "Not Found" on detail page
+                        const parts = code.split('-');
+                        const shortCode = parts.length > 3 ? parts.slice(0, 3).join('-') : code;
+                        if (!seen.has(shortCode)) {
+                            seen.add(shortCode);
+                            items.push(shortCode);
+                        }
+                    });
+                    return items;
+                }""")
+
+                if not vehicle_ids:
+                    break
+
+                new_ids = [vid for vid in vehicle_ids if f"iauc-{vid}" not in existing_ids]
+                skipped = len(vehicle_ids) - len(new_ids)
+                if page_num == 1:
+                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {len(vehicle_ids)} on page ({len(new_ids)} new, {skipped} existing)")
+                else:
+                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {len(vehicle_ids)} ({len(new_ids)} new)")
+
+                # ── Parallel vehicle extraction ──────────────────────────────────
+                target = get_target_date()
+                semaphore = asyncio.Semaphore(CONCURRENT_TABS)
+
+                async def extract_with_limit(vid: str):
+                    async with semaphore:
+                        new_page = await context.new_page()
+                        try:
+                            return await _extract_vehicle(new_page, vid, tid)
+                        except Exception as e:
+                            print(f"  [iauc] Detail {vid} failed: {e}")
+                            return None
+                        finally:
+                            await new_page.close()
+
+                raw_results = await asyncio.gather(
+                    *[extract_with_limit(vid) for vid in new_ids],
+                    return_exceptions=True,
+                )
+
+                vehicles = []
+                skipped_date = 0
+                for v in raw_results:
+                    if not v or isinstance(v, Exception) or not v.get("item_id"):
+                        continue
+                    auction_date_str = v.get("auction_date", "")
+                    auction_date = normalize_auction_date(auction_date_str, "iauc")
+                    if auction_date and auction_date < target:
+                        skipped_date += 1
+                        continue
+                    vehicles.append(v)
+
+                if skipped_date:
+                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: skipped {skipped_date} vehicles with past auction dates")
+
+                if vehicles:
+                    result = upsert_auctions(vehicles)
+                    all_ids.extend(v["item_id"] for v in vehicles)
+                    existing_ids.update(v["item_id"] for v in vehicles)
+                    img_total = sum(len(v.get("images", [])) for v in vehicles)
+                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {len(vehicles)} → DB (new:{result['new']}, imgs:{img_total})")
+
+                # Track all IDs (including skipped existing)
+                for vid in vehicle_ids:
+                    item_id = f"iauc-{vid}"
+                    if item_id not in batch_ids:
+                        batch_ids.append(item_id)
+
+                # Try next page
+                has_next = await page.evaluate("""() => {
+                    const links = document.querySelectorAll('a');
+                    for (const a of links) {
+                        if (a.textContent.trim() === 'Next' && a.getAttribute('onclick') && a.getAttribute('onclick').includes('get_carlist')) {
+                            a.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }""")
+                if not has_next:
+                    break
+                await asyncio.sleep(3)
+
+                # Wait for new results to load
+                for _ in range(10):
+                    cnt = await page.evaluate("() => document.querySelectorAll('img[data-code]').length")
+                    if cnt > 0:
+                        break
+                    await asyncio.sleep(1)
+
+            # Add batch IDs to total
+            for bid in batch_ids:
+                if bid not in all_ids:
+                    all_ids.append(bid)
+
+            # Reload Make & Model page fresh for next batch
+            search_url = search_base_url + "#maker"
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+            await asyncio.sleep(3)
+            # Re-select makers for this pass
+            await _select_makers(page, maker_filter)
 
     elapsed = time.time() - scrape_start
     print(f"  [iauc] Total: {len(all_ids)} vehicles in {elapsed/60:.1f} min")
@@ -376,10 +460,6 @@ async def _extract_vehicle(page: Page, vehicle_id: str, tid: str) -> dict | None
     vehicle["images"] = car_images
     vehicle["image_url"] = car_images[0] if car_images else None
     vehicle["exhibit_sheet"] = exhibit_sheet
-
-    # Go back
-    await page.go_back()
-    await asyncio.sleep(2)
 
     return vehicle
 
