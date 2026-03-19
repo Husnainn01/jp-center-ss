@@ -44,9 +44,11 @@ def delete_r2_images(keys: list[str]) -> int:
     deleted = 0
     max_retries = 3
 
-    # Use smaller batches (100) to avoid R2 InternalError on large deletes
-    for i in range(0, len(keys), 100):
-        batch = keys[i:i + 100]
+    # Use smaller batches (50) to avoid R2 InternalError on large deletes
+    total_batches = (len(keys) + 49) // 50
+    for i in range(0, len(keys), 50):
+        batch = keys[i:i + 50]
+        batch_num = i // 50 + 1
         for attempt in range(1, max_retries + 1):
             try:
                 response = client.delete_objects(
@@ -59,14 +61,18 @@ def delete_r2_images(keys: list[str]) -> int:
                 errors = response.get("Errors", [])
                 deleted += len(batch) - len(errors)
                 if errors:
-                    print(f"  [cleanup] {len(errors)} R2 delete errors: {errors[:3]}")
+                    print(f"  [cleanup] Batch {batch_num}/{total_batches}: {len(errors)} R2 errors")
                 break  # success, move to next batch
             except Exception as e:
                 if attempt < max_retries:
-                    print(f"  [cleanup] R2 batch delete failed (attempt {attempt}/{max_retries}), retrying in {attempt * 2}s...")
-                    time.sleep(attempt * 2)
+                    print(f"  [cleanup] Batch {batch_num}/{total_batches} failed (attempt {attempt}/{max_retries}), retrying in {attempt * 3}s...")
+                    time.sleep(attempt * 3)
                 else:
-                    print(f"  [cleanup] R2 batch delete failed after {max_retries} attempts: {e}")
+                    print(f"  [cleanup] Batch {batch_num}/{total_batches} failed after {max_retries} attempts: {e}")
+
+        # Pause between batches to avoid rate limiting
+        if i + 50 < len(keys):
+            time.sleep(1)
 
     return deleted
 

@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
-from jst import today_jst
+from jst import today_jst, get_target_date
 
 load_dotenv()
 
@@ -251,10 +251,10 @@ def get_expired_auctions_with_images() -> list[dict]:
             text("""
                 SELECT id, item_id, image_url, images, exhibit_sheet, source
                 FROM auctions
-                WHERE auction_date_norm < :today
+                WHERE auction_date_norm < :cutoff
                 AND auction_date_norm IS NOT NULL
             """),
-            {"today": today_jst()},
+            {"cutoff": get_target_date()},
         ).fetchall()
         results = []
         for row in rows:
@@ -280,7 +280,8 @@ def get_expired_auctions_with_images() -> list[dict]:
 
 
 def delete_expired_auctions() -> int:
-    """Delete auctions where auction_date_norm is before today (JST). Returns count deleted."""
+    """Delete auctions before target date (tomorrow). Today's auctions can't be bid on. Returns count deleted."""
+    cutoff = get_target_date()
     session = Session()
     try:
         # First delete car_list_items that reference these auctions
@@ -289,11 +290,11 @@ def delete_expired_auctions() -> int:
                 DELETE FROM car_list_items
                 WHERE auction_id IN (
                     SELECT id FROM auctions
-                    WHERE auction_date_norm < :today
+                    WHERE auction_date_norm < :cutoff
                     AND auction_date_norm IS NOT NULL
                 )
             """),
-            {"today": today_jst()},
+            {"cutoff": cutoff},
         )
         # Then delete bid_requests that reference these auctions
         session.execute(
@@ -301,20 +302,20 @@ def delete_expired_auctions() -> int:
                 DELETE FROM bid_requests
                 WHERE auction_id IN (
                     SELECT id FROM auctions
-                    WHERE auction_date_norm < :today
+                    WHERE auction_date_norm < :cutoff
                     AND auction_date_norm IS NOT NULL
                 )
             """),
-            {"today": today_jst()},
+            {"cutoff": cutoff},
         )
         # Now delete the auctions
         result = session.execute(
             text("""
                 DELETE FROM auctions
-                WHERE auction_date_norm < :today
+                WHERE auction_date_norm < :cutoff
                 AND auction_date_norm IS NOT NULL
             """),
-            {"today": today_jst()},
+            {"cutoff": cutoff},
         )
         session.commit()
         return result.rowcount
