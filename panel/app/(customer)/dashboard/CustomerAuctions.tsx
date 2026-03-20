@@ -429,7 +429,7 @@ function Content() {
                   </div>
                   <div className="p-3 space-y-1.5">
                     <p className="text-sm font-semibold truncate leading-tight group-hover:text-primary transition-colors">
-                      {a.maker} {a.model}
+                      {a.maker || "Unknown"} {a.model || "Vehicle"}
                     </p>
                     <p className="text-xs text-muted-foreground truncate">
                       {[a.year, a.mileage, a.color].filter(Boolean).join(" · ")}
@@ -462,8 +462,9 @@ function Content() {
               </thead>
               <tbody>
                 {auctions.map(a => (
-                  <tr key={a.id} className="border-b last:border-0 hover:bg-accent/40 transition-colors cursor-pointer group" onClick={() => router.push(`/dashboard/${a.id}`)}>
+                  <tr key={a.id} className="border-b last:border-0 hover:bg-accent/40 transition-colors cursor-pointer group relative" onClick={() => router.push(`/dashboard/${a.id}`)}>
                     <td className="px-3 py-2">
+                      <Link href={`/dashboard/${a.id}`} className="absolute inset-0 z-[1]" aria-label={`${a.maker || ""} ${a.model || "Vehicle"}`} />
                       <div className="w-[48px] h-[34px] rounded overflow-hidden bg-muted relative">
                         {a.imageUrl ? (
                           <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="48px" loading="lazy" unoptimized />
@@ -473,7 +474,7 @@ function Content() {
                       </div>
                     </td>
                     <td className="px-2 py-2">
-                      <p className="font-medium truncate max-w-[220px] group-hover:text-primary transition-colors">{a.maker} {a.model}</p>
+                      <p className="font-medium truncate max-w-[220px] group-hover:text-primary transition-colors">{a.maker || "Unknown"} {a.model || "Vehicle"}</p>
                       <p className="text-[10px] text-muted-foreground truncate">{a.grade || ""}</p>
                     </td>
                     <td className="px-2 py-2 hidden md:table-cell">

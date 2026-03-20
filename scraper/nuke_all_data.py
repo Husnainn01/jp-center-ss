@@ -4,8 +4,12 @@ Run with: python3 nuke_all_data.py"""
 import os
 import sys
 
-# Set DATABASE_URL before any imports that use it
+# Set DATABASE_URL + Railway bucket before any imports that use it
 os.environ["DATABASE_URL"] = "postgresql://postgres:BPaVRgCxgvGDilvonyVwqvqbSsJAYnWJ@shuttle.proxy.rlwy.net:35795/railway"
+os.environ["S3_ENDPOINT"] = "https://t3.storageapi.dev"
+os.environ["S3_BUCKET"] = "organized-cube-9oku28ouqf"
+os.environ["S3_ACCESS_KEY"] = "tid_IEkAKLjDPbGkOiwgQRDr_pqKAdAlqdBmsDN_cMHvdKdyxHSrtq"
+os.environ["S3_SECRET_KEY"] = "tsec_04C2KII5qgpbAIKwoAHztP60jab3EG_vcIzPM15IbCZW_FleTugOWeU5Oi8dYdCEZ5Lqtf"
 
 from dotenv import load_dotenv
 load_dotenv(override=False)  # Don't override the URL we just set
