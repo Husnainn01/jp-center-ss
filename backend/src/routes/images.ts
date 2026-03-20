@@ -4,8 +4,10 @@ import { Readable } from "stream";
 
 export const imagesRouter = Router();
 
+const S3_ENDPOINT = process.env.S3_ENDPOINT || "https://dffe00b2c327c69b4a869d74b4e7a2a2.r2.cloudflarestorage.com";
+// Railway storage needs forcePathStyle, Cloudflare R2 also supports it
 const s3 = new S3Client({
-  endpoint: process.env.S3_ENDPOINT || "https://dffe00b2c327c69b4a869d74b4e7a2a2.r2.cloudflarestorage.com",
+  endpoint: S3_ENDPOINT,
   region: "auto",
   credentials: {
     accessKeyId: process.env.S3_ACCESS_KEY || "",
@@ -56,10 +58,11 @@ imagesRouter.get("/:prefix/:filename", async (req, res) => {
     }
   } catch (err: unknown) {
     const code = (err as { name?: string }).name;
+    const message = (err as { message?: string }).message;
+    console.error(`S3 proxy error: [${code}] ${message} — bucket=${BUCKET} key=${prefix}/${filename} endpoint=${S3_ENDPOINT}`);
     if (code === "NoSuchKey") {
       res.status(404).send("Not found");
     } else {
-      console.error("S3 proxy error:", err);
       res.status(500).send("Error");
     }
   }
