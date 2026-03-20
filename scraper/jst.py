@@ -1,9 +1,9 @@
 """Japan Standard Time utilities.
 
-Core rule: always target today's date in JST.
-- Auctions from previous days are skipped (they are gone)
-- After midnight JST, today_jst() naturally becomes the next day
-- No manual time-based switching needed — the date rolls itself
+Core rule: always target tomorrow's date in JST.
+- Today's auctions have already started — too late to bid
+- Customer needs tomorrow's vehicles to submit bids in advance
+- Scrapers skip today + past, only keep tomorrow and future
 """
 
 from datetime import datetime, timedelta, timezone
@@ -23,24 +23,23 @@ def today_jst():
 
 def should_scrape_today() -> bool:
     """
-    Always True — today's auctions are always upcoming until midnight JST.
-    After midnight, today_jst() itself rolls to the new day automatically.
-    No manual switching needed.
+    False — today's auctions have already started, no point scraping them.
+    iAUC uses this to uncheck the 'Today' button so it doesn't even fetch today's vehicles.
     """
-    return True
+    return False
 
 
 def get_target_date():
     """
-    Always returns today in JST.
+    Returns tomorrow in JST — the earliest auction date worth scraping.
 
-    Mar 19 09:00 JST → Mar 19   (today's upcoming auctions)
-    Mar 19 23:59 JST → Mar 19   (still today until midnight)
-    Mar 20 00:01 JST → Mar 20   (new day, now targeting Mar 20)
+    Mar 20 09:00 JST → Mar 21   (skip today, target tomorrow)
+    Mar 20 23:59 JST → Mar 21   (still targeting tomorrow)
+    Mar 21 00:01 JST → Mar 22   (new day, tomorrow shifts forward)
 
-    Anything before this date is a past auction and gets skipped.
+    Anything before this date is skipped (today + past).
     """
-    return today_jst()
+    return today_jst() + timedelta(days=1)
 
 
 def is_overnight_window() -> bool:

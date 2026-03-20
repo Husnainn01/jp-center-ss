@@ -32,15 +32,23 @@ auctionsRouter.get("/", async (req, res) => {
     const includeMeta = req.query.includeMeta === "true";
 
     const where: Prisma.AuctionWhereInput = {};
-    if (maker) where.maker = { contains: maker };
-    if (model) where.model = { contains: model };
-    if (location) where.location = { contains: location };
-    if (chassisCode) where.chassisCode = { contains: chassisCode };
-    if (auctionHouse) where.auctionHouse = { contains: auctionHouse };
+    if (maker) where.maker = maker;
+    if (model) where.model = model;
+    if (location) where.location = location;
+    if (chassisCode) where.chassisCode = chassisCode;
+    if (auctionHouse) where.auctionHouse = auctionHouse;
     if (source) where.source = source;
     if (status) where.status = status;
     else if (!req.query.status) where.status = undefined; // Allow all statuses by default
-    if (rating) where.rating = { contains: rating };
+    if (rating) {
+      if (rating === "S") {
+        where.rating = "S";
+      } else {
+        // rating is a numeric threshold like "4.5" — find >= that value
+        // rating field is string, so we use gte which works for numeric-like strings
+        where.rating = { gte: rating, not: "S" };
+      }
+    }
     if (yearFrom || yearTo) {
       where.year = {};
       if (yearFrom) where.year.gte = yearFrom;

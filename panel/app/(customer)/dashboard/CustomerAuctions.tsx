@@ -9,30 +9,22 @@ import { formatPrice } from "@/lib/format";
 import { proxyUrl } from "@/lib/image";
 import { Button } from "@/components/ui/button";
 import {
-  ChevronLeft, ChevronRight, Car, LayoutGrid, AlignJustify, X, Calendar,
+  ChevronLeft, ChevronRight, Car, LayoutGrid, AlignJustify, X, Calendar, Loader2,
 } from "lucide-react";
 
 interface FilterOption { value: string; count: number }
 interface DayOption { date: string; count: number }
-interface Props {
-  auctions: AuctionSerialized[];
-  page: number;
-  totalPages: number;
-  total: number;
-  sourceCounts: Record<string, number>;
-  filterOptions: {
-    makers: FilterOption[];
-    locations: FilterOption[];
-    auctionHouses: FilterOption[];
-    auctionDays?: DayOption[];
-  };
+interface FilterOptions {
+  makers: FilterOption[];
+  locations: FilterOption[];
+  auctionHouses: FilterOption[];
+  auctionDays?: DayOption[];
 }
 
 const sel = "h-9 rounded-md border border-input bg-card px-3 text-xs w-full focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary cursor-pointer appearance-none";
 
 function formatDayLabel(dateStr: string): { label: string; day: string; weekday: string } {
   const d = new Date(dateStr + "T00:00:00");
-  // Use JST for "Today"/"Tomorrow" since auctions are in Japan
   const jstNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
   const today = new Date(jstNow.getFullYear(), jstNow.getMonth(), jstNow.getDate());
   const tomorrow = new Date(today);
@@ -48,14 +40,103 @@ function formatDayLabel(dateStr: string): { label: string; day: string; weekday:
 
 const YEARS = Array.from({ length: 30 }, (_, i) => (2026 - i).toString());
 
-function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
+const PASSTHROUGH_KEYS = ["maker", "model", "chassisCode", "location", "auctionHouse", "source", "search", "sort", "order", "minPrice", "maxPrice", "rating", "yearFrom", "yearTo", "auctionDay"];
+
+function buildQueryString(sp: URLSearchParams, includeMeta: boolean): string {
+  const params = new URLSearchParams();
+  const page = Math.max(1, parseInt(sp.get("page") || "1"));
+  params.set("page", String(page));
+  params.set("pageSize", "40");
+  if (includeMeta) params.set("includeMeta", "true");
+  if (!sp.get("status")) params.set("status", "upcoming");
+
+  for (const key of PASSTHROUGH_KEYS) {
+    const val = sp.get(key);
+    if (val) params.set(key, val);
+  }
+  if (!sp.get("sort")) params.set("sort", "firstSeen");
+  if (!sp.get("order")) params.set("order", "desc");
+
+  return params.toString();
+}
+
+function Content() {
   const router = useRouter();
   const sp = useSearchParams();
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [models, setModels] = useState<FilterOption[]>([]);
   const [chassisCodes, setChassisCodes] = useState<FilterOption[]>([]);
 
+  // Client-side data state
+  const [auctions, setAuctions] = useState<AuctionSerialized[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({ makers: [], locations: [], auctionHouses: [] });
+  const [loading, setLoading] = useState(true);
+  const [initialLoad, setInitialLoad] = useState(true);
+
+  // Track whether meta has been fetched
+  const metaLoaded = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const get = useCallback((k: string) => sp.get(k) ?? "", [sp]);
+
+  // Fetch auctions from API (client-side)
+  const fetchAuctions = useCallback((searchParams: URLSearchParams) => {
+    // Cancel any in-flight request
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const includeMeta = !metaLoaded.current;
+    const qs = buildQueryString(searchParams, includeMeta);
+
+    setLoading(true);
+
+    fetch(`/api/auctions?${qs}`, { signal: controller.signal })
+      .then(r => r.json())
+      .then(data => {
+        setAuctions(data.auctions || []);
+        setTotal(data.total || 0);
+        setPage(data.page || 1);
+        setTotalPages(data.totalPages || 0);
+
+        if (includeMeta && data.filterOptions) {
+          setFilterOptions(data.filterOptions);
+          metaLoaded.current = true;
+        }
+
+        setLoading(false);
+        setInitialLoad(false);
+      })
+      .catch(err => {
+        if (err.name !== "AbortError") {
+          setLoading(false);
+          setInitialLoad(false);
+        }
+      });
+  }, []);
+
+  // Fetch on mount and when search params change (debounced)
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      fetchAuctions(sp);
+    }, initialLoad ? 0 : 150);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [sp, fetchAuctions, initialLoad]);
+
+  // Cleanup abort on unmount
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   // Restore saved filters on first load if no URL params
   useEffect(() => {
@@ -65,7 +146,6 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
         if (saved) {
           const params = new URLSearchParams(saved);
           params.delete("page");
-          // Clear stale auctionDay (past dates)
           const savedDay = params.get("auctionDay");
           if (savedDay) {
             const jstNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
@@ -115,22 +195,47 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
     if ("maker" in updates && updates.maker !== get("maker")) { params.delete("model"); params.delete("chassisCode"); }
     if ("model" in updates && updates.model !== get("model")) params.delete("chassisCode");
     params.delete("page");
-    router.push(`/dashboard?${params.toString()}`);
+    router.replace(`/dashboard?${params.toString()}`);
   }
 
   function clearAll() {
     try { localStorage.removeItem("auction-filters"); } catch {}
-    router.push("/dashboard");
+    router.replace("/dashboard");
   }
   function goPage(p: number) {
     const params = new URLSearchParams(sp.toString());
     params.set("page", String(p));
-    router.push(`/dashboard?${params.toString()}`);
+    router.replace(`/dashboard?${params.toString()}`);
   }
 
   const filterKeys = ["auctionDay", "maker", "model", "chassisCode", "location", "auctionHouse", "minPrice", "maxPrice", "rating", "yearFrom", "yearTo"];
   const activeFilters = filterKeys.filter(k => get(k)).length;
   const auctionDays = filterOptions.auctionDays || [];
+
+  // Skeleton for initial load
+  if (initialLoad) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-6 w-36 bg-muted animate-pulse rounded" />
+            <div className="h-6 w-20 bg-muted animate-pulse rounded-full" />
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-16 w-20 bg-muted animate-pulse rounded-lg" />
+          ))}
+        </div>
+        <div className="h-24 bg-muted animate-pulse rounded-lg" />
+        <div className="space-y-1">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <div key={i} className="h-12 bg-muted/50 animate-pulse rounded" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -286,104 +391,114 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
         )}
       </div>
 
-      {/* Empty state */}
-      {auctions.length === 0 ? (
-        <div className="py-20 text-center">
-          <Car className="h-10 w-10 mx-auto text-muted-foreground/20 mb-3" />
-          <p className="text-sm text-muted-foreground">No vehicles match your filters</p>
-          {activeFilters > 0 && (
-            <button onClick={clearAll} className="text-xs text-primary hover:underline mt-2">Clear all filters</button>
-          )}
-        </div>
-      ) : viewMode === "grid" ? (
-        /* Grid */
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {auctions.map(a => (
-            <Link key={a.id} href={`/dashboard/${a.id}`} className="group">
-              <div className="bg-card border rounded-lg overflow-hidden hover:shadow-md hover:border-primary/20 transition-all duration-150">
-                <div className="aspect-[16/10] bg-muted relative overflow-hidden">
-                  {a.imageUrl ? (
-                    <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover group-hover:scale-[1.03] transition-transform duration-200" sizes="(max-width: 640px) 50vw, 25vw" loading="lazy" unoptimized />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-muted-foreground/20"><Car className="h-6 w-6" /></div>
-                  )}
-                  {a.rating && (
-                    <span className="absolute top-1.5 right-1.5 text-[9px] font-bold bg-black/60 text-white px-1.5 py-0.5 rounded">
-                      {a.rating}
-                    </span>
-                  )}
-                </div>
-                <div className="p-3 space-y-1.5">
-                  <p className="text-sm font-semibold truncate leading-tight group-hover:text-primary transition-colors">
-                    {a.maker} {a.model}
-                  </p>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {[a.year, a.mileage, a.color].filter(Boolean).join(" · ")}
-                  </p>
-                  <div className="flex items-center justify-between pt-0.5">
-                    <span className="text-sm font-bold">
-                      {a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}
-                    </span>
+      {/* Table/Grid with loading overlay */}
+      <div className="relative">
+        {/* Loading overlay — shown over existing data during refetch */}
+        {loading && !initialLoad && (
+          <div className="absolute inset-0 bg-background/60 z-10 flex items-center justify-center rounded-lg">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
+        {/* Empty state */}
+        {auctions.length === 0 && !loading ? (
+          <div className="py-20 text-center">
+            <Car className="h-10 w-10 mx-auto text-muted-foreground/20 mb-3" />
+            <p className="text-sm text-muted-foreground">No vehicles match your filters</p>
+            {activeFilters > 0 && (
+              <button onClick={clearAll} className="text-xs text-primary hover:underline mt-2">Clear all filters</button>
+            )}
+          </div>
+        ) : viewMode === "grid" ? (
+          /* Grid */
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {auctions.map(a => (
+              <Link key={a.id} href={`/dashboard/${a.id}`} className="group">
+                <div className="bg-card border rounded-lg overflow-hidden hover:shadow-md hover:border-primary/20 transition-all duration-150">
+                  <div className="aspect-[16/10] bg-muted relative overflow-hidden">
+                    {a.imageUrl ? (
+                      <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover group-hover:scale-[1.03] transition-transform duration-200" sizes="(max-width: 640px) 50vw, 25vw" loading="lazy" unoptimized />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-muted-foreground/20"><Car className="h-6 w-6" /></div>
+                    )}
+                    {a.rating && (
+                      <span className="absolute top-1.5 right-1.5 text-[9px] font-bold bg-black/60 text-white px-1.5 py-0.5 rounded">
+                        {a.rating}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-[10px] text-muted-foreground truncate">{a.auctionHouse} · {a.auctionDate}</p>
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      ) : (
-        /* List — data-dense table */
-        <div className="bg-card border rounded-lg overflow-hidden">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b bg-muted/40">
-                <th className="text-left font-medium text-muted-foreground px-3 py-2.5 w-[56px]"></th>
-                <th className="text-left font-medium text-muted-foreground px-2 py-2.5">Vehicle</th>
-                <th className="text-left font-medium text-muted-foreground px-2 py-2.5 hidden md:table-cell">Auction</th>
-                <th className="text-left font-medium text-muted-foreground px-2 py-2.5 hidden lg:table-cell">Specs</th>
-                <th className="text-center font-medium text-muted-foreground px-2 py-2.5 hidden sm:table-cell w-[60px]">Score</th>
-                <th className="text-left font-medium text-muted-foreground px-2 py-2.5 hidden lg:table-cell">Date</th>
-                <th className="text-right font-medium text-muted-foreground px-3 py-2.5">Price</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auctions.map(a => (
-                <tr key={a.id} className="border-b last:border-0 hover:bg-accent/40 transition-colors cursor-pointer group" onClick={() => router.push(`/dashboard/${a.id}`)}>
-                  <td className="px-3 py-2">
-                    <div className="w-[48px] h-[34px] rounded overflow-hidden bg-muted relative">
-                      {a.imageUrl ? (
-                        <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="48px" loading="lazy" unoptimized />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-muted-foreground/20"><Car className="h-3.5 w-3.5" /></div>
-                      )}
+                  <div className="p-3 space-y-1.5">
+                    <p className="text-sm font-semibold truncate leading-tight group-hover:text-primary transition-colors">
+                      {a.maker} {a.model}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {[a.year, a.mileage, a.color].filter(Boolean).join(" · ")}
+                    </p>
+                    <div className="flex items-center justify-between pt-0.5">
+                      <span className="text-sm font-bold">
+                        {a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}
+                      </span>
                     </div>
-                  </td>
-                  <td className="px-2 py-2">
-                    <p className="font-medium truncate max-w-[220px] group-hover:text-primary transition-colors">{a.maker} {a.model}</p>
-                    <p className="text-[10px] text-muted-foreground truncate">{a.grade || ""}</p>
-                  </td>
-                  <td className="px-2 py-2 hidden md:table-cell">
-                    <p className="truncate max-w-[160px]">{a.auctionHouse}</p>
-                    <p className="text-[10px] text-muted-foreground">{a.location}</p>
-                  </td>
-                  <td className="px-2 py-2 hidden lg:table-cell text-muted-foreground">
-                    {[a.year, a.mileage, a.color].filter(Boolean).join(" · ")}
-                  </td>
-                  <td className="px-2 py-2 text-center hidden sm:table-cell">
-                    {a.rating && <span className="text-[10px] font-bold bg-muted px-1.5 py-0.5 rounded">{a.rating}</span>}
-                  </td>
-                  <td className="px-2 py-2 hidden lg:table-cell text-muted-foreground text-[10px]">
-                    {a.auctionDate}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <span className="font-bold">{a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}</span>
-                  </td>
+                    <p className="text-[10px] text-muted-foreground truncate">{a.auctionHouse} · {a.auctionDate}</p>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          /* List — data-dense table */
+          <div className="bg-card border rounded-lg overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b bg-muted/40">
+                  <th className="text-left font-medium text-muted-foreground px-3 py-2.5 w-[56px]"></th>
+                  <th className="text-left font-medium text-muted-foreground px-2 py-2.5">Vehicle</th>
+                  <th className="text-left font-medium text-muted-foreground px-2 py-2.5 hidden md:table-cell">Auction</th>
+                  <th className="text-left font-medium text-muted-foreground px-2 py-2.5 hidden lg:table-cell">Specs</th>
+                  <th className="text-center font-medium text-muted-foreground px-2 py-2.5 hidden sm:table-cell w-[60px]">Score</th>
+                  <th className="text-left font-medium text-muted-foreground px-2 py-2.5 hidden lg:table-cell">Date</th>
+                  <th className="text-right font-medium text-muted-foreground px-3 py-2.5">Price</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {auctions.map(a => (
+                  <tr key={a.id} className="border-b last:border-0 hover:bg-accent/40 transition-colors cursor-pointer group" onClick={() => router.push(`/dashboard/${a.id}`)}>
+                    <td className="px-3 py-2">
+                      <div className="w-[48px] h-[34px] rounded overflow-hidden bg-muted relative">
+                        {a.imageUrl ? (
+                          <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="48px" loading="lazy" unoptimized />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-muted-foreground/20"><Car className="h-3.5 w-3.5" /></div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-2 py-2">
+                      <p className="font-medium truncate max-w-[220px] group-hover:text-primary transition-colors">{a.maker} {a.model}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{a.grade || ""}</p>
+                    </td>
+                    <td className="px-2 py-2 hidden md:table-cell">
+                      <p className="truncate max-w-[160px]">{a.auctionHouse}</p>
+                      <p className="text-[10px] text-muted-foreground">{a.location}</p>
+                    </td>
+                    <td className="px-2 py-2 hidden lg:table-cell text-muted-foreground">
+                      {[a.year, a.mileage, a.color].filter(Boolean).join(" · ")}
+                    </td>
+                    <td className="px-2 py-2 text-center hidden sm:table-cell">
+                      {a.rating && <span className="text-[10px] font-bold bg-muted px-1.5 py-0.5 rounded">{a.rating}</span>}
+                    </td>
+                    <td className="px-2 py-2 hidden lg:table-cell text-muted-foreground text-[10px]">
+                      {a.auctionDate}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <span className="font-bold">{a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Pagination */}
       {totalPages > 1 && (
@@ -414,32 +529,30 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
   );
 }
 
-export function CustomerAuctions(props: Props) {
+export function CustomerAuctions() {
   return (
     <Suspense fallback={
       <div className="space-y-4">
-        <div className="h-8 w-40 bg-muted animate-pulse rounded" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-6 w-36 bg-muted animate-pulse rounded" />
+            <div className="h-6 w-20 bg-muted animate-pulse rounded-full" />
+          </div>
+        </div>
         <div className="flex gap-2">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="h-16 w-20 bg-muted animate-pulse rounded-lg" />
           ))}
         </div>
         <div className="h-24 bg-muted animate-pulse rounded-lg" />
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="bg-card border rounded-lg overflow-hidden">
-              <div className="aspect-[16/10] bg-muted animate-pulse" />
-              <div className="p-3 space-y-2">
-                <div className="h-4 bg-muted animate-pulse rounded w-3/4" />
-                <div className="h-3 bg-muted animate-pulse rounded w-1/2" />
-                <div className="h-4 bg-muted animate-pulse rounded w-1/3" />
-              </div>
-            </div>
+        <div className="space-y-1">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <div key={i} className="h-12 bg-muted/50 animate-pulse rounded" />
           ))}
         </div>
       </div>
     }>
-      <Content {...props} />
+      <Content />
     </Suspense>
   );
 }
