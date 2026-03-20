@@ -42,6 +42,7 @@ app.use("/api/auction-sites", auctionSitesRouter);
 app.use("/api/auth", authSyncRouter);
 app.use("/api/scraper-status", scraperStatusRouter);
 app.use("/s3", imagesRouter);
+app.use("/api/s3-image", imagesRouter);
 app.use("/api/cache", cacheRouter);
 
 // Health check

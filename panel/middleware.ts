@@ -15,6 +15,7 @@ const PROXY_PATHS = [
   "/api/users",
   "/api/settings",
   "/api/auction-sites",
+  "/api/s3-image",
 ];
 
 export async function middleware(request: NextRequest) {
