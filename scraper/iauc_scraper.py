@@ -288,10 +288,12 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                         if (!vid || seen.has(vid)) continue;
                         seen.add(vid);
 
-                        // Get long code (contains auction date) from any data-code with 6 parts
+                        // Get long code (contains auction date) from any data-code attribute
                         let longCode = '';
+                        const allCodes = [];
                         row.querySelectorAll('[data-code]').forEach(el => {
                             const c = el.getAttribute('data-code') || '';
+                            if (c) allCodes.push(c);
                             if (c.split('-').length > 3 && !longCode) longCode = c;
                         });
 
@@ -313,6 +315,7 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                         results.push({
                             vid,
                             longCode,
+                            allCodes,
                             thumbUrl,
                             model_grade: cells['col3'] || '',
                             site: cells['col4'] || '',
@@ -350,6 +353,9 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                         continue
 
                     auction_date_str = vehicle.get("auction_date", "")
+                    if not auction_date_str:
+                        print(f"  [iauc] DEBUG: vid={rv['vid']} has NO auction_date. longCode='{rv.get('longCode','')}' allCodes={rv.get('allCodes',[])} site='{rv.get('site','')}'")
+
                     auction_date = normalize_auction_date(auction_date_str, "iauc")
                     if auction_date and auction_date < target:
                         skipped_date += 1
