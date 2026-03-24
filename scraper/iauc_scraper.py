@@ -255,23 +255,29 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                 await asyncio.sleep(1)
 
             # Switch to 100 items per page for faster pagination (default is 15)
+            # The page has a <select id="select_limit"> with onchange="get_carlist(this)"
             switched = await page.evaluate("""() => {
-                const btn100 = document.getElementById('limit-preload-100');
-                if (btn100) { btn100.click(); return true; }
-                // Fallback: set the hidden limit input directly
-                const limitInput = document.getElementById('car_search_add_cond_limit');
-                if (limitInput) { limitInput.value = '100'; return true; }
+                const sel = document.getElementById('select_limit');
+                if (sel) {
+                    sel.value = '100';
+                    // Trigger the onchange which calls get_carlist
+                    sel.dispatchEvent(new Event('change'));
+                    return true;
+                }
                 return false;
             }""")
             if switched:
-                await asyncio.sleep(3)
-                # Wait for page to reload with 100 items
-                for _ in range(10):
+                await asyncio.sleep(4)
+                # Wait for page to reload with more items
+                for _ in range(15):
                     cnt = await page.evaluate("() => document.querySelectorAll('tr.scroll-anchor.line-auction').length")
-                    if cnt > 15:
+                    if cnt > 20:
                         break
                     await asyncio.sleep(1)
-                print(f"  [iauc] Switched to 100 items/page")
+                actual = await page.evaluate("() => document.querySelectorAll('tr.scroll-anchor.line-auction').length")
+                print(f"  [iauc] Switched to 100 items/page (got {actual} rows on first page)")
+            else:
+                print(f"  [iauc] Could not find page size selector, using default 15/page")
 
             # Paginate through results — extract data from list, images from detail in parallel
             batch_ids = []
