@@ -2,6 +2,7 @@
 
 import os
 import hashlib
+import time as _time
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
@@ -39,30 +40,34 @@ def _get_client():
 
 
 def upload_image(img_bytes: bytes, prefix: str, source_url: str) -> str | None:
-    """Upload image bytes to S3. Returns public URL or None on failure."""
+    """Upload image bytes to S3. Retries up to 3 times with backoff. Returns public URL or None."""
     if not S3_ACCESS_KEY or not S3_SECRET_KEY:
         return None
 
-    try:
-        filename = hashlib.md5(source_url.encode()).hexdigest() + ".jpg"
-        key = f"{prefix}/{filename}"
+    filename = hashlib.md5(source_url.encode()).hexdigest() + ".jpg"
+    key = f"{prefix}/{filename}"
 
-        client = _get_client()
-
-        # Check if already exists
+    for attempt in range(1, 4):
         try:
-            client.head_object(Bucket=S3_BUCKET, Key=key)
-            return f"/s3/{key}"
-        except ClientError:
-            pass
+            client = _get_client()
 
-        client.put_object(
-            Bucket=S3_BUCKET,
-            Key=key,
-            Body=img_bytes,
-            ContentType="image/jpeg",
-        )
-        return f"/s3/{key}"
-    except Exception as e:
-        print(f"  [storage] Upload failed for {prefix}: {e}")
-        return None
+            # Check if already exists
+            try:
+                client.head_object(Bucket=S3_BUCKET, Key=key)
+                return f"/s3/{key}"
+            except ClientError:
+                pass
+
+            client.put_object(
+                Bucket=S3_BUCKET,
+                Key=key,
+                Body=img_bytes,
+                ContentType="image/jpeg",
+            )
+            return f"/s3/{key}"
+        except Exception as e:
+            if attempt < 3:
+                _time.sleep(attempt * 2)
+            else:
+                print(f"  [storage] Upload failed after 3 attempts for {prefix}: {e}")
+                return None

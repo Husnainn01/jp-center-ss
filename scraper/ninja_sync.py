@@ -62,6 +62,16 @@ async def run_ninja_sync(makers: list[str] | None = None):
 
             total = len(scraped_ids)
 
+            # Backfill missing images/sheets using the same session
+            print("[ninja-sync] Running image backfill...")
+            try:
+                from backfill import backfill_ninja
+                page = context.pages[-1] if context.pages else await context.new_page()
+                bf_result = await backfill_ninja(page, context)
+                print(f"[ninja-sync] Backfill: {bf_result['fixed']}/{bf_result['attempted']} fixed")
+            except Exception as be:
+                print(f"[ninja-sync] Backfill error (non-fatal): {be}")
+
             # Cleanup expired auctions + R2 images
             print("[ninja-sync] Running cleanup of expired auctions...")
             try:
@@ -69,6 +79,13 @@ async def run_ninja_sync(makers: list[str] | None = None):
                 print(f"[ninja-sync] Cleanup: {cleanup_result['expired_auctions']} auctions deleted, {cleanup_result['r2_images_deleted']} R2 images deleted")
             except Exception as ce:
                 print(f"[ninja-sync] Cleanup error (non-fatal): {ce}")
+
+            # Verify completeness
+            try:
+                from verify import get_db_counts, log_completeness
+                log_completeness("uss", get_db_counts("uss"))
+            except Exception as ve:
+                print(f"[ninja-sync] Verify error (non-fatal): {ve}")
 
             duration_ms = int((time.time() - start) * 1000)
             log_sync(0, 0, 0, total, duration_ms, source="ninja")

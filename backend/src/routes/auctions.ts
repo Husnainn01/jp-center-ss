@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { serializeAuction } from "../lib/serialize.js";
-import type { Prisma } from "../generated/prisma/client.js";
+import { Prisma } from "../generated/prisma/client.js";
 import { cached } from "../lib/cache.js";
 
 export const auctionsRouter = Router();
@@ -86,23 +86,48 @@ auctionsRouter.get("/", async (req, res) => {
       prisma.auction.count({ where }),
     ]);
 
+    // Day counts: same filters as main query but WITHOUT auctionDay
+    // This ensures day button counts reflect the user's active filters
+    const filteredDays = await
+      prisma.$queryRaw<{ date: string; cnt: number }[]>`
+        SELECT auction_date_norm::text as date, COUNT(*)::int as cnt
+        FROM auctions
+        WHERE status = 'upcoming'
+          AND auction_date_norm IS NOT NULL
+          AND auction_date_norm >= (NOW() AT TIME ZONE 'Asia/Tokyo')::date
+          ${maker ? Prisma.sql`AND maker = ${maker}` : Prisma.empty}
+          ${model ? Prisma.sql`AND model = ${model}` : Prisma.empty}
+          ${location ? Prisma.sql`AND location = ${location}` : Prisma.empty}
+          ${chassisCode ? Prisma.sql`AND chassis_code = ${chassisCode}` : Prisma.empty}
+          ${auctionHouse ? Prisma.sql`AND auction_house = ${auctionHouse}` : Prisma.empty}
+          ${source ? Prisma.sql`AND source = ${source}` : Prisma.empty}
+          ${minPrice ? Prisma.sql`AND start_price >= ${parseFloat(minPrice)}` : Prisma.empty}
+          ${maxPrice ? Prisma.sql`AND start_price <= ${parseFloat(maxPrice)}` : Prisma.empty}
+          ${yearFrom ? Prisma.sql`AND year >= ${yearFrom}` : Prisma.empty}
+          ${yearTo ? Prisma.sql`AND year <= ${yearTo}` : Prisma.empty}
+          ${rating === "S" ? Prisma.sql`AND rating = 'S'` : rating ? Prisma.sql`AND rating >= ${rating} AND rating != 'S'` : Prisma.empty}
+          ${search ? Prisma.sql`AND (maker ILIKE ${'%' + search + '%'} OR model ILIKE ${'%' + search + '%'} OR lot_number ILIKE ${'%' + search + '%'} OR grade ILIKE ${'%' + search + '%'} OR item_id ILIKE ${'%' + search + '%'})` : Prisma.empty}
+        GROUP BY auction_date_norm
+        ORDER BY auction_date_norm ASC
+      `;
+
     const response: Record<string, unknown> = {
       auctions: auctions.map(serializeAuction),
       total,
       page,
       pageSize,
       totalPages: Math.ceil(total / pageSize),
+      auctionDays: filteredDays.map(d => ({ date: d.date, count: d.cnt })),
     };
 
     // Meta/filter options — cached (same for all users, only changes on scraper sync)
     if (includeMeta) {
       const meta = await cached("auctions:meta", async () => {
-        const [sourceCounts, makers, locations, houses, days] = await Promise.all([
+        const [sourceCounts, makers, locations, houses] = await Promise.all([
           prisma.auction.groupBy({ by: ["source"], where: { status: "upcoming" }, _count: true }),
           prisma.$queryRaw<{ maker: string; cnt: number }[]>`SELECT maker, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY maker ORDER BY cnt DESC LIMIT 30`,
           prisma.$queryRaw<{ location: string; cnt: number }[]>`SELECT location, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY location ORDER BY cnt DESC LIMIT 20`,
           prisma.$queryRaw<{ auction_house: string; cnt: number }[]>`SELECT auction_house, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' GROUP BY auction_house ORDER BY cnt DESC`,
-          prisma.$queryRaw<{ date: string; cnt: number }[]>`SELECT auction_date_norm::text as date, COUNT(*)::int as cnt FROM auctions WHERE status='upcoming' AND auction_date_norm IS NOT NULL AND auction_date_norm >= (NOW() AT TIME ZONE 'Asia/Tokyo')::date GROUP BY auction_date_norm ORDER BY auction_date_norm ASC`,
         ]);
         return {
           sourceCounts: Object.fromEntries(sourceCounts.map(s => [s.source, s._count])),
@@ -110,7 +135,6 @@ auctionsRouter.get("/", async (req, res) => {
             makers: makers.map(m => ({ value: m.maker, count: m.cnt })),
             locations: locations.map(l => ({ value: l.location, count: l.cnt })),
             auctionHouses: houses.map(h => ({ value: h.auction_house, count: h.cnt })),
-            auctionDays: days.map(d => ({ date: d.date, count: d.cnt })),
           },
         };
       }, META_TTL);

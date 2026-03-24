@@ -65,6 +65,15 @@ async def run_iauc_sync():
 
             total = len(scraped_ids)
 
+            # Backfill missing images/sheets using the same session
+            print("[iauc-sync] Running image backfill...")
+            try:
+                from backfill import backfill_iauc
+                bf_result = await backfill_iauc(page, context)
+                print(f"[iauc-sync] Backfill: {bf_result['fixed']}/{bf_result['attempted']} fixed")
+            except Exception as be:
+                print(f"[iauc-sync] Backfill error (non-fatal): {be}")
+
             # Cleanup expired auctions + R2 images
             print("[iauc-sync] Running cleanup of expired auctions...")
             try:
@@ -72,6 +81,13 @@ async def run_iauc_sync():
                 print(f"[iauc-sync] Cleanup: {cleanup_result['expired_auctions']} auctions deleted, {cleanup_result['r2_images_deleted']} R2 images deleted")
             except Exception as ce:
                 print(f"[iauc-sync] Cleanup error (non-fatal): {ce}")
+
+            # Verify completeness
+            try:
+                from verify import get_db_counts, log_completeness
+                log_completeness("iauc", get_db_counts("iauc"))
+            except Exception as ve:
+                print(f"[iauc-sync] Verify error (non-fatal): {ve}")
 
             duration_ms = int((time.time() - start) * 1000)
             log_sync(0, 0, 0, total, duration_ms, source="iauc")

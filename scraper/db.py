@@ -222,7 +222,7 @@ def get_existing_item_ids(source: str) -> set[str]:
     session = Session()
     try:
         rows = session.execute(
-            text("SELECT item_id FROM auctions WHERE source = :source AND image_url IS NOT NULL"),
+            text("SELECT item_id FROM auctions WHERE source = :source"),
             {"source": source},
         ).fetchall()
         return {row[0] for row in rows}
@@ -280,7 +280,7 @@ def get_expired_auctions_with_images() -> list[dict]:
 
 
 def delete_expired_auctions() -> int:
-    """Delete auctions before target date (tomorrow). Today's auctions can't be bid on. Returns count deleted."""
+    """Delete auctions before target date (today). Yesterday and older get removed. Returns count deleted."""
     cutoff = get_target_date()
     session = Session()
     try:
@@ -322,5 +322,70 @@ def delete_expired_auctions() -> int:
     except Exception as e:
         session.rollback()
         raise e
+    finally:
+        session.close()
+
+
+def get_vehicles_missing_assets(source: str) -> list[dict]:
+    """Get upcoming vehicles missing images or exhibit sheets for backfill.
+    Ordered by auction date (soonest first) so tomorrow's vehicles get priority."""
+    session = Session()
+    try:
+        rows = session.execute(
+            text("""
+                SELECT item_id, image_url, images, exhibit_sheet
+                FROM auctions
+                WHERE source = :source
+                AND auction_date_norm >= :target
+                AND (image_url IS NULL OR exhibit_sheet IS NULL)
+                ORDER BY auction_date_norm ASC
+            """),
+            {"source": source, "target": get_target_date()},
+        ).fetchall()
+        results = []
+        for row in rows:
+            images_raw = row[2] or "[]"
+            if isinstance(images_raw, str):
+                try:
+                    images_list = json.loads(images_raw)
+                except Exception:
+                    images_list = []
+            else:
+                images_list = images_raw if isinstance(images_raw, list) else []
+            results.append({
+                "item_id": row[0],
+                "image_url": row[1],
+                "images": images_list,
+                "exhibit_sheet": row[3],
+                "missing_image": row[1] is None,
+                "missing_sheet": row[3] is None,
+            })
+        return results
+    finally:
+        session.close()
+
+
+def update_vehicle_assets(item_id: str, image_url: str | None, images: list, exhibit_sheet: str | None):
+    """Update only image/sheet fields for an existing vehicle. COALESCE preserves existing data."""
+    session = Session()
+    try:
+        session.execute(
+            text("""
+                UPDATE auctions SET
+                    image_url = COALESCE(:image_url, image_url),
+                    images = CASE WHEN jsonb_array_length(CAST(:images AS jsonb)) > 0
+                                  THEN CAST(:images AS jsonb) ELSE images END,
+                    exhibit_sheet = COALESCE(:exhibit_sheet, exhibit_sheet),
+                    last_updated = NOW()
+                WHERE item_id = :item_id
+            """),
+            {
+                "item_id": item_id,
+                "image_url": image_url,
+                "images": json.dumps(images),
+                "exhibit_sheet": exhibit_sheet,
+            },
+        )
+        session.commit()
     finally:
         session.close()

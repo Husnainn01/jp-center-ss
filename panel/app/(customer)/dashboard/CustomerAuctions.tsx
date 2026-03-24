@@ -76,8 +76,8 @@ function Content() {
   const [loading, setLoading] = useState(true);
   const [initialLoad, setInitialLoad] = useState(true);
 
-  // Track whether meta has been fetched
-  const metaLoaded = useRef(false);
+  // Track whether dropdown meta (makers, locations, houses) has been fetched
+  const dropdownMetaLoaded = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -90,7 +90,8 @@ function Content() {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    const includeMeta = !metaLoaded.current;
+    // Always request meta for dropdowns on first load; auctionDays come in every response
+    const includeMeta = !dropdownMetaLoaded.current;
     const qs = buildQueryString(searchParams, includeMeta);
 
     setLoading(true);
@@ -103,9 +104,15 @@ function Content() {
         setPage(data.page || 1);
         setTotalPages(data.totalPages || 0);
 
+        // auctionDays now comes in every response (filter-aware counts)
+        if (data.auctionDays) {
+          setFilterOptions(prev => ({ ...prev, auctionDays: data.auctionDays }));
+        }
+
+        // Dropdown options (makers, locations, houses) only on first load
         if (includeMeta && data.filterOptions) {
-          setFilterOptions(data.filterOptions);
-          metaLoaded.current = true;
+          setFilterOptions(prev => ({ ...prev, ...data.filterOptions }));
+          dropdownMetaLoaded.current = true;
         }
 
         setLoading(false);

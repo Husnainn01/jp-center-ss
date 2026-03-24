@@ -649,21 +649,29 @@ def _parse_list_row(rv: dict, maker: str) -> dict | None:
 
 
 async def _download_and_upload(page: Page, url: str, prefix: str) -> str | None:
-    try:
-        result = await page.evaluate("""async (url) => {
-            try {
-                const res = await fetch(url, { credentials: 'include' });
-                if (!res.ok) return null;
-                const blob = await res.blob();
-                const reader = new FileReader();
-                return new Promise(r => { reader.onloadend = () => r(reader.result); reader.readAsDataURL(blob); });
-            } catch { return null; }
-        }""", url)
-        if result and result.startswith("data:"):
-            b64 = result.split(",", 1)[1]
-            img_bytes = base64.b64decode(b64)
-            if len(img_bytes) > 500:
-                return upload_image(img_bytes, prefix, url)
-        return None
-    except:
-        return None
+    """Download image via authenticated browser and upload to R2. Retries once on failure."""
+    for attempt in range(2):
+        try:
+            result = await page.evaluate("""async (url) => {
+                try {
+                    const res = await fetch(url, { credentials: 'include' });
+                    if (!res.ok) return null;
+                    const blob = await res.blob();
+                    const reader = new FileReader();
+                    return new Promise(r => { reader.onloadend = () => r(reader.result); reader.readAsDataURL(blob); });
+                } catch { return null; }
+            }""", url)
+            if result and result.startswith("data:"):
+                b64 = result.split(",", 1)[1]
+                img_bytes = base64.b64decode(b64)
+                if len(img_bytes) > 500:
+                    return upload_image(img_bytes, prefix, url)
+            if attempt == 0:
+                await asyncio.sleep(1)
+                continue
+            return None
+        except:
+            if attempt == 0:
+                await asyncio.sleep(1)
+                continue
+            return None

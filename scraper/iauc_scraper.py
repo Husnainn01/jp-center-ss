@@ -25,11 +25,11 @@ JAPANESE_MAKERS = {
 }
 
 # ── Limits (overnight vs daytime delta) ─────────────────────────────────────
-BATCH_SIZE           = 50    if OVERNIGHT_MODE else 40    # models per batch
-MAX_VEHICLES_TOTAL   = 99999 if OVERNIGHT_MODE else 5000  # no cap overnight
-MAX_TIME_TOTAL       = 28800 if OVERNIGHT_MODE else 10800 # 8 hrs vs 3 hrs
-MAX_RESULTS_PER_BATCH = 500  if OVERNIGHT_MODE else 400   # pagination depth
-CONCURRENT_TABS      = 15   if OVERNIGHT_MODE else 8      # parallel extractions
+BATCH_SIZE           = 50    if OVERNIGHT_MODE else 50    # models per batch
+MAX_VEHICLES_TOTAL   = 99999 if OVERNIGHT_MODE else 99999 # no cap — skip logic handles dedup
+MAX_TIME_TOTAL       = 28800 if OVERNIGHT_MODE else 10800 # 8 hrs overnight, 3 hrs daytime safety
+MAX_RESULTS_PER_BATCH = 500  if OVERNIGHT_MODE else 500   # no per-batch cap
+CONCURRENT_TABS      = 15   if OVERNIGHT_MODE else 10     # parallel extractions
 
 
 async def _select_makers(page: Page, maker_names: set[str] | None = None):
@@ -109,9 +109,8 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     await page.click("a.title-button.checkbox_on_all")
     await asyncio.sleep(1)
 
-    # should_scrape_today() is always True so this block never runs.
-    # Today's checkbox stays checked — we always include today's upcoming auctions.
-    # After midnight JST, today_jst() rolls naturally to the next day.
+    # should_scrape_today() returns True — we include today's auctions.
+    # This block only runs if should_scrape_today() is overridden to False.
     if not scrape_today:
         days = await page.evaluate("""() => {
             return Array.from(document.querySelectorAll('button.day-button')).map(btn => {
@@ -816,22 +815,29 @@ def _parse_detail(text: str, vehicle_id: str) -> dict:
 
 
 async def _download_and_upload(page: Page, url: str) -> str | None:
-    """Download image via authenticated browser and upload to R2."""
-    try:
-        result = await page.evaluate("""async (url) => {
-            try {
-                const res = await fetch(url, { credentials: 'include' });
-                if (!res.ok) return null;
-                const blob = await res.blob();
-                const reader = new FileReader();
-                return new Promise(r => { reader.onloadend = () => r(reader.result); reader.readAsDataURL(blob); });
-            } catch { return null; }
-        }""", url)
-        if result and result.startswith("data:"):
-            b64 = result.split(",", 1)[1]
-            img_bytes = base64.b64decode(b64)
-            if len(img_bytes) > 500:
-                return upload_image(img_bytes, "iauc-images", url)
-        return None
-    except:
-        return None
+    """Download image via authenticated browser and upload to R2. Retries once on failure."""
+    for attempt in range(2):
+        try:
+            result = await page.evaluate("""async (url) => {
+                try {
+                    const res = await fetch(url, { credentials: 'include' });
+                    if (!res.ok) return null;
+                    const blob = await res.blob();
+                    const reader = new FileReader();
+                    return new Promise(r => { reader.onloadend = () => r(reader.result); reader.readAsDataURL(blob); });
+                } catch { return null; }
+            }""", url)
+            if result and result.startswith("data:"):
+                b64 = result.split(",", 1)[1]
+                img_bytes = base64.b64decode(b64)
+                if len(img_bytes) > 500:
+                    return upload_image(img_bytes, "iauc-images", url)
+            if attempt == 0:
+                await asyncio.sleep(1)
+                continue
+            return None
+        except:
+            if attempt == 0:
+                await asyncio.sleep(1)
+                continue
+            return None
