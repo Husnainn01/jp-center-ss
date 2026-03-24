@@ -65,6 +65,7 @@ function Content() {
   const sp = useSearchParams();
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [models, setModels] = useState<FilterOption[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
   const [chassisCodes, setChassisCodes] = useState<FilterOption[]>([]);
 
   // Client-side data state
@@ -182,16 +183,24 @@ function Content() {
     const maker = get("maker");
     const model = get("model");
     if (maker) {
+      setModelsLoading(true);
       const params = new URLSearchParams({ maker });
       if (model) params.set("model", model);
       fetch(`/api/filter-options?${params}`)
-        .then(r => r.json())
+        .then(r => {
+          if (!r.ok) throw new Error(`filter-options ${r.status}`);
+          return r.json();
+        })
         .then(d => {
           setModels(d.models || []);
           setChassisCodes(d.chassisCodes || []);
         })
-        .catch(() => { setModels([]); setChassisCodes([]); });
-    } else { setModels([]); setChassisCodes([]); }
+        .catch(() => {
+          setModels([]);
+          setChassisCodes([]);
+        })
+        .finally(() => setModelsLoading(false));
+    } else { setModels([]); setChassisCodes([]); setModelsLoading(false); }
   }, [get]);
 
   function update(updates: Record<string, string>) {
@@ -316,8 +325,8 @@ function Content() {
             {filterOptions.makers.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
           </select>
 
-          <select value={get("model")} onChange={e => update({ model: e.target.value })} className={sel} disabled={models.length === 0 && !get("maker")}>
-            <option value="">{get("maker") ? (models.length ? "All Models" : "Loading...") : "Select Make first"}</option>
+          <select value={get("model")} onChange={e => update({ model: e.target.value })} className={sel} disabled={!get("maker") || modelsLoading}>
+            <option value="">{get("maker") ? (modelsLoading ? "Loading..." : models.length ? "All Models" : "No models found") : "Select Make first"}</option>
             {models.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
           </select>
 
