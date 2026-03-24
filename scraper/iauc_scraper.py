@@ -28,7 +28,7 @@ JAPANESE_MAKERS = {
 BATCH_SIZE           = 50    if OVERNIGHT_MODE else 50    # models per batch
 MAX_VEHICLES_TOTAL   = 99999 if OVERNIGHT_MODE else 99999 # no cap — skip logic handles dedup
 MAX_TIME_TOTAL       = 28800 if OVERNIGHT_MODE else 10800 # 8 hrs overnight, 3 hrs daytime safety
-MAX_RESULTS_PER_BATCH = 500  if OVERNIGHT_MODE else 500   # no per-batch cap
+MAX_RESULTS_PER_BATCH = 99999 if OVERNIGHT_MODE else 99999 # no cap — time limit is the safety valve
 CONCURRENT_TABS      = 15   if OVERNIGHT_MODE else 10     # parallel extractions
 
 
@@ -191,12 +191,12 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                     items.push({ name, cnt, idx });
                 }
             });
-            items.sort((a, b) => a.cnt - b.cnt);
+            items.sort((a, b) => b.cnt - a.cnt);
             return items;
         }""")
 
         total_cars = sum(m['cnt'] for m in models)
-        print(f"  [iauc] Pass {pass_idx + 1}: {len(models)} models, {total_cars} total vehicles (sorted smallest first)")
+        print(f"  [iauc] Pass {pass_idx + 1}: {len(models)} models, {total_cars} total vehicles (sorted LARGEST first)")
         print(f"  [iauc] Limits: {MAX_VEHICLES_TOTAL} vehicles, {MAX_TIME_TOTAL // 60} min total")
 
         if total_cars == 0:
@@ -260,6 +260,25 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                 if cnt > 0:
                     break
                 await asyncio.sleep(1)
+
+            # Switch to 100 items per page for faster pagination (default is 15)
+            switched = await page.evaluate("""() => {
+                const btn100 = document.getElementById('limit-preload-100');
+                if (btn100) { btn100.click(); return true; }
+                // Fallback: set the hidden limit input directly
+                const limitInput = document.getElementById('car_search_add_cond_limit');
+                if (limitInput) { limitInput.value = '100'; return true; }
+                return false;
+            }""")
+            if switched:
+                await asyncio.sleep(3)
+                # Wait for page to reload with 100 items
+                for _ in range(10):
+                    cnt = await page.evaluate("() => document.querySelectorAll('tr.scroll-anchor.line-auction').length")
+                    if cnt > 15:
+                        break
+                    await asyncio.sleep(1)
+                print(f"  [iauc] Switched to 100 items/page")
 
             # Paginate through results — extract data from list, images from detail in parallel
             batch_ids = []
