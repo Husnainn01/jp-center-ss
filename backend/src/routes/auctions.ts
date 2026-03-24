@@ -35,7 +35,7 @@ auctionsRouter.get("/", async (req, res) => {
     if (maker) where.maker = maker;
     if (model) where.model = model;
     if (location) where.location = location;
-    if (chassisCode) where.chassisCode = chassisCode;
+    if (chassisCode) where.chassisCode = { contains: chassisCode, mode: "insensitive" };
     if (auctionHouse) where.auctionHouse = auctionHouse;
     if (source) where.source = source;
     if (status) where.status = status;
@@ -66,9 +66,11 @@ auctionsRouter.get("/", async (req, res) => {
       where.OR = [
         { maker: { contains: search, mode: "insensitive" } },
         { model: { contains: search, mode: "insensitive" } },
+        { chassisCode: { contains: search, mode: "insensitive" } },
         { lotNumber: { contains: search, mode: "insensitive" } },
         { grade: { contains: search, mode: "insensitive" } },
         { itemId: { contains: search, mode: "insensitive" } },
+        { auctionHouse: { contains: search, mode: "insensitive" } },
       ];
     }
 
@@ -98,7 +100,7 @@ auctionsRouter.get("/", async (req, res) => {
           ${maker ? Prisma.sql`AND maker = ${maker}` : Prisma.empty}
           ${model ? Prisma.sql`AND model = ${model}` : Prisma.empty}
           ${location ? Prisma.sql`AND location = ${location}` : Prisma.empty}
-          ${chassisCode ? Prisma.sql`AND chassis_code = ${chassisCode}` : Prisma.empty}
+          ${chassisCode ? Prisma.sql`AND chassis_code ILIKE ${'%' + chassisCode + '%'}` : Prisma.empty}
           ${auctionHouse ? Prisma.sql`AND auction_house = ${auctionHouse}` : Prisma.empty}
           ${source ? Prisma.sql`AND source = ${source}` : Prisma.empty}
           ${minPrice ? Prisma.sql`AND start_price >= ${parseFloat(minPrice)}` : Prisma.empty}

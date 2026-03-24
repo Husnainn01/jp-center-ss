@@ -9,37 +9,16 @@ import { formatPrice } from "@/lib/format";
 import { proxyUrl } from "@/lib/image";
 import { Button } from "@/components/ui/button";
 import {
-  ChevronLeft, ChevronRight, Car, LayoutGrid, AlignJustify, X, Calendar, Loader2,
+  ChevronLeft, ChevronRight, Car, LayoutGrid, AlignJustify, Loader2,
 } from "lucide-react";
 import { useNavigationContext } from "../components/NavigationContext";
+import { SmartSearch } from "./SmartSearch";
 
-interface FilterOption { value: string; count: number }
 interface DayOption { date: string; count: number }
 interface FilterOptions {
-  makers: FilterOption[];
-  locations: FilterOption[];
-  auctionHouses: FilterOption[];
   auctionDays?: DayOption[];
 }
 
-const sel = "h-8 rounded border border-border bg-card px-2.5 text-xs text-foreground/90 w-full focus:outline-none focus:ring-1 focus:ring-blue-500/40 focus:border-blue-500/40 cursor-pointer appearance-none transition-colors hover:border-ring/30";
-
-function formatDayLabel(dateStr: string): { label: string; day: string; weekday: string } {
-  const d = new Date(dateStr + "T00:00:00");
-  const jstNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
-  const today = new Date(jstNow.getFullYear(), jstNow.getMonth(), jstNow.getDate());
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  const day = d.getDate().toString();
-  const weekday = d.toLocaleDateString("en", { weekday: "short" });
-
-  if (d.getTime() === today.getTime()) return { label: "Today", day, weekday: "" };
-  if (d.getTime() === tomorrow.getTime()) return { label: "Tomorrow", day, weekday: "" };
-  return { label: weekday, day, weekday };
-}
-
-const YEARS = Array.from({ length: 30 }, (_, i) => (2026 - i).toString());
 
 const PASSTHROUGH_KEYS = ["maker", "model", "chassisCode", "location", "auctionHouse", "source", "search", "sort", "order", "minPrice", "maxPrice", "rating", "yearFrom", "yearTo", "auctionDay"];
 
@@ -66,16 +45,13 @@ function Content() {
   const sp = useSearchParams();
   const navCtx = useNavigationContext();
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
-  const [models, setModels] = useState<FilterOption[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(false);
-  const [chassisCodes, setChassisCodes] = useState<FilterOption[]>([]);
 
   // Client-side data state
   const [auctions, setAuctions] = useState<AuctionSerialized[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
-  const [filterOptions, setFilterOptions] = useState<FilterOptions>({ makers: [], locations: [], auctionHouses: [] });
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({});
   const [loading, setLoading] = useState(true);
   const [initialLoad, setInitialLoad] = useState(true);
 
@@ -191,29 +167,22 @@ function Content() {
     } catch {}
   }, [sp]);
 
-  useEffect(() => {
-    const maker = get("maker");
-    const model = get("model");
-    if (maker) {
-      setModelsLoading(true);
-      const params = new URLSearchParams({ maker });
-      if (model) params.set("model", model);
-      fetch(`/api/filter-options?${params}`)
-        .then(r => {
-          if (!r.ok) throw new Error(`filter-options ${r.status}`);
-          return r.json();
-        })
-        .then(d => {
-          setModels(d.models || []);
-          setChassisCodes(d.chassisCodes || []);
-        })
-        .catch(() => {
-          setModels([]);
-          setChassisCodes([]);
-        })
-        .finally(() => setModelsLoading(false));
-    } else { setModels([]); setChassisCodes([]); setModelsLoading(false); }
-  }, [get]);
+  function handleSmartSearch(filters: Record<string, string>) {
+    // Build fresh params — only include non-empty filter values
+    // This ensures old params are cleared when the user removes a filter
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v) params.set(k, v);
+    });
+    // Preserve sort, order, auctionDay from current URL
+    const currentSort = sp.get("sort");
+    const currentOrder = sp.get("order");
+    const currentDay = sp.get("auctionDay");
+    if (currentSort) params.set("sort", currentSort);
+    if (currentOrder) params.set("order", currentOrder);
+    if (currentDay) params.set("auctionDay", currentDay);
+    router.replace(`/dashboard?${params.toString()}`);
+  }
 
   function update(updates: Record<string, string>) {
     const params = new URLSearchParams(sp.toString());
@@ -236,8 +205,6 @@ function Content() {
     router.replace(`/dashboard?${params.toString()}`);
   }
 
-  const filterKeys = ["auctionDay", "maker", "model", "chassisCode", "location", "auctionHouse", "minPrice", "maxPrice", "rating", "yearFrom", "yearTo"];
-  const activeFilters = filterKeys.filter(k => get(k)).length;
   const auctionDays = filterOptions.auctionDays || [];
 
   // Skeleton for initial load
@@ -265,14 +232,9 @@ function Content() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-base font-bold tracking-tight text-foreground">Vehicles</h1>
-          <span className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded font-mono">
-            {total.toLocaleString()}
-          </span>
-        </div>
+      {/* Header + Smart Search */}
+      <div className="flex items-center justify-between mb-3">
+        <h1 className="text-base font-bold tracking-tight text-foreground">Vehicles</h1>
         <div className="flex items-center gap-1">
           <div className="flex border border-border rounded overflow-hidden h-7">
             <button onClick={() => setViewMode("grid")} className={`px-2 transition-colors ${viewMode === "grid" ? "bg-accent text-foreground" : "text-muted-foreground/70 hover:text-foreground/80 hover:bg-muted"}`}>
@@ -285,131 +247,15 @@ function Content() {
         </div>
       </div>
 
-      {/* Auction Day Picker */}
-      {auctionDays.length > 0 && (
-        <div className="flex gap-1.5 overflow-x-auto pb-1">
-          <button
-            onClick={() => update({ auctionDay: "" })}
-            className={`flex-shrink-0 px-3 py-1.5 rounded border text-xs font-medium transition-all ${
-              !get("auctionDay")
-                ? "bg-blue-500 text-white border-blue-500"
-                : "bg-card text-muted-foreground border-border hover:text-foreground/90 hover:border-ring/30"
-            }`}
-          >
-            All
-          </button>
-          {auctionDays.map(d => {
-            const { label, day } = formatDayLabel(d.date);
-            const isSelected = get("auctionDay") === d.date;
-            return (
-              <button
-                key={d.date}
-                onClick={() => update({ auctionDay: isSelected ? "" : d.date })}
-                className={`flex-shrink-0 min-w-[60px] px-2.5 py-1.5 rounded border text-center transition-all ${
-                  isSelected
-                    ? "bg-blue-500 text-white border-blue-500"
-                    : "bg-card text-muted-foreground border-border hover:text-foreground/90 hover:border-ring/30"
-                }`}
-              >
-                <div className="text-[9px] font-medium opacity-70">{label}</div>
-                <div className="text-sm font-bold leading-tight">{day}</div>
-                <div className="text-[9px] font-mono opacity-50">{d.count}</div>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="bg-card border border-border rounded p-3 space-y-2.5">
-        {/* Row 1: Make, Model, Chassis Code, Year range */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          <select value={get("maker")} onChange={e => update({ maker: e.target.value })} className={sel}>
-            <option value="">All Makes</option>
-            {filterOptions.makers.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
-          </select>
-
-          <select value={get("model")} onChange={e => update({ model: e.target.value })} className={sel} disabled={!get("maker") || modelsLoading}>
-            <option value="">{get("maker") ? (modelsLoading ? "Loading..." : models.length ? "All Models" : "No models found") : "Select Make first"}</option>
-            {models.map(m => <option key={m.value} value={m.value}>{m.value} ({m.count})</option>)}
-          </select>
-
-          <select value={get("chassisCode")} onChange={e => update({ chassisCode: e.target.value })} className={sel} disabled={chassisCodes.length === 0 && !get("model")}>
-            <option value="">{get("model") ? (chassisCodes.length ? "All Chassis" : "No chassis data") : "Select Model first"}</option>
-            {chassisCodes.map(c => <option key={c.value} value={c.value}>{c.value} ({c.count})</option>)}
-          </select>
-
-          <select value={get("yearFrom")} onChange={e => update({ yearFrom: e.target.value })} className={sel}>
-            <option value="">Year From</option>
-            {YEARS.slice().reverse().map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-
-          <select value={get("yearTo")} onChange={e => update({ yearTo: e.target.value })} className={sel}>
-            <option value="">Year To</option>
-            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-        </div>
-
-        {/* Row 2: Auction House, Price, Rating, Sort */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          <select value={get("auctionHouse")} onChange={e => update({ auctionHouse: e.target.value })} className={sel}>
-            <option value="">All Auctions</option>
-            {filterOptions.auctionHouses.map(h => <option key={h.value} value={h.value}>{h.value}</option>)}
-          </select>
-
-          <select value={get("minPrice")} onChange={e => update({ minPrice: e.target.value })} className={sel}>
-            <option value="">Min Price</option>
-            <option value="10000">¥10,000+</option>
-            <option value="50000">¥50,000+</option>
-            <option value="100000">¥100,000+</option>
-            <option value="300000">¥300,000+</option>
-            <option value="500000">¥500,000+</option>
-            <option value="1000000">¥1,000,000+</option>
-            <option value="3000000">¥3,000,000+</option>
-            <option value="5000000">¥5,000,000+</option>
-          </select>
-
-          <select value={get("maxPrice")} onChange={e => update({ maxPrice: e.target.value })} className={sel}>
-            <option value="">Max Price</option>
-            <option value="50000">~¥50,000</option>
-            <option value="100000">~¥100,000</option>
-            <option value="300000">~¥300,000</option>
-            <option value="500000">~¥500,000</option>
-            <option value="1000000">~¥1,000,000</option>
-            <option value="3000000">~¥3,000,000</option>
-            <option value="5000000">~¥5,000,000</option>
-            <option value="10000000">~¥10,000,000</option>
-          </select>
-
-          <select value={get("rating")} onChange={e => update({ rating: e.target.value })} className={sel}>
-            <option value="">Any Rating</option>
-            <option value="S">S</option>
-            <option value="6">6+</option>
-            <option value="5">5+</option>
-            <option value="4.5">4.5+</option>
-            <option value="4">4+</option>
-            <option value="3.5">3.5+</option>
-          </select>
-
-          <select value={get("sort") || "firstSeen"} onChange={e => update({ sort: e.target.value })} className={sel}>
-            <option value="firstSeen">Sort: Newest</option>
-            <option value="auctionDateNorm">Sort: Auction Date</option>
-            <option value="startPrice">Sort: Price</option>
-            <option value="maker">Sort: Maker</option>
-            <option value="year">Sort: Year</option>
-          </select>
-        </div>
-
-        {/* Clear filters */}
-        {activeFilters > 0 && (
-          <div className="flex items-center justify-between pt-1">
-            <span className="text-[11px] text-muted-foreground/70">{activeFilters} filter{activeFilters > 1 ? "s" : ""}</span>
-            <button onClick={clearAll} className="h-7 px-2.5 rounded border border-border text-muted-foreground text-[11px] font-medium hover:text-foreground/90 hover:border-ring/30 transition-colors flex items-center gap-1.5">
-              <X className="h-3 w-3" /> Clear
-            </button>
-          </div>
-        )}
-      </div>
+      <SmartSearch
+        onFiltersChange={handleSmartSearch}
+        auctionDays={auctionDays}
+        selectedDay={get("auctionDay")}
+        onDaySelect={(day) => update({ auctionDay: day })}
+        sort={get("sort") || "firstSeen"}
+        onSortChange={(s) => update({ sort: s })}
+        total={total}
+      />
 
       {/* Table/Grid with loading overlay */}
       <div className="relative">
@@ -425,9 +271,7 @@ function Content() {
           <div className="py-16 text-center">
             <Car className="h-8 w-8 mx-auto text-muted-foreground/30 mb-3" />
             <p className="text-sm text-muted-foreground/70">No vehicles match your filters</p>
-            {activeFilters > 0 && (
-              <button onClick={clearAll} className="text-xs text-blue-400 hover:text-blue-300 mt-2">Clear all filters</button>
-            )}
+            <button onClick={clearAll} className="text-xs text-blue-400 hover:text-blue-300 mt-2">Clear all filters</button>
           </div>
         ) : viewMode === "grid" ? (
           /* Grid */
