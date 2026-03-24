@@ -161,12 +161,19 @@ function Content() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save filters to localStorage whenever they change
+  // Only save actual filter params, not sort/order/pageSize (those are preferences, not filters)
+  const FILTER_KEYS = ["maker", "model", "chassisCode", "location", "auctionHouse", "source", "search", "minPrice", "maxPrice", "rating", "yearFrom", "yearTo", "auctionDay"];
   useEffect(() => {
     try {
-      const params = new URLSearchParams(sp.toString());
-      params.delete("page");
+      const params = new URLSearchParams();
+      for (const key of FILTER_KEYS) {
+        const val = sp.get(key);
+        if (val) params.set(key, val);
+      }
       if (params.toString()) {
         localStorage.setItem("auction-filters", params.toString());
+      } else {
+        localStorage.removeItem("auction-filters");
       }
     } catch {}
   }, [sp]);
