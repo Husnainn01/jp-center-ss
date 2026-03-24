@@ -109,20 +109,45 @@ body {
   --sidebar-ring: #3b82f6;
 }
 
-/* Sharp focus rings for all interactive elements */
-:root {
-  --focus-ring: 0 0 0 2px #0a0a0b, 0 0 0 4px #3b82f6;
+/* Light theme — off-white, easy on the eyes */
+.light {
+  --background: #f5f5f4;
+  --foreground: #1c1917;
+  --card: #ffffff;
+  --card-foreground: #1c1917;
+  --popover: #ffffff;
+  --popover-foreground: #1c1917;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f5f4;
+  --secondary-foreground: #1c1917;
+  --muted: #e7e5e4;
+  --muted-foreground: #78716c;
+  --accent: #e7e5e4;
+  --accent-foreground: #1c1917;
+  --destructive: #ef4444;
+  --border: rgba(0, 0, 0, 0.08);
+  --input: rgba(0, 0, 0, 0.08);
+  --ring: #2563eb;
+  --sidebar: #fafaf9;
+  --sidebar-foreground: #1c1917;
+  --sidebar-primary: #2563eb;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e7e5e4;
+  --sidebar-accent-foreground: #1c1917;
+  --sidebar-border: rgba(0, 0, 0, 0.08);
+  --sidebar-ring: #2563eb;
 }
 
-/* Button hover lift */
-.btn-sharp {
-  transition: all 0.1s ease;
+/* Light scrollbar */
+.light ::-webkit-scrollbar-thumb {
+  background: #d6d3d1;
 }
-.btn-sharp:hover {
-  filter: brightness(1.15);
+.light ::-webkit-scrollbar-thumb:hover {
+  background: #a8a29e;
 }
-.btn-sharp:active {
-  transform: scale(0.98);
+.light .table-row-hover:hover {
+  background: #fafaf9;
 }
 
 @layer base {

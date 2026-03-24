@@ -23,7 +23,7 @@ export function MobileBottomBar({ auctionId }: Props) {
         {prevId ? (
           <Link
             href={`/dashboard/${prevId}`}
-            className="flex items-center gap-1 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors min-w-[80px]"
+            className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors min-w-[80px]"
           >
             <ChevronLeft className="h-4 w-4 flex-shrink-0" />
             <span className="truncate">Prev</span>
@@ -33,7 +33,7 @@ export function MobileBottomBar({ auctionId }: Props) {
         )}
 
         {/* Position */}
-        <span className="text-[11px] font-mono text-zinc-500">
+        <span className="text-[11px] font-mono text-muted-foreground">
           {index + 1}/{totalCount}
         </span>
 
@@ -41,7 +41,7 @@ export function MobileBottomBar({ auctionId }: Props) {
         {nextId ? (
           <Link
             href={`/dashboard/${nextId}`}
-            className="flex items-center gap-1 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors min-w-[80px] justify-end"
+            className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors min-w-[80px] justify-end"
           >
             <span className="truncate">Next</span>
             <ChevronRight className="h-4 w-4 flex-shrink-0" />

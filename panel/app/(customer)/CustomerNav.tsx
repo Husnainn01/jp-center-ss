@@ -31,8 +31,8 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
             onClick={onNavigate}
             className={`group relative flex items-center gap-2.5 px-3 py-2 text-[13px] transition-all duration-100 ${
               isActive
-                ? "bg-zinc-800/80 text-zinc-50 font-medium"
-                : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
+                ? "bg-muted/80 text-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground/80 hover:bg-muted/40"
             }`}
           >
             {isActive && (
@@ -54,8 +54,8 @@ function SidebarBrand() {
         <Car className="h-4 w-4 text-white" />
       </div>
       <div>
-        <h1 className="text-sm font-bold tracking-tight text-zinc-50">JP CENTER</h1>
-        <p className="text-[9px] text-zinc-500 font-medium tracking-wider uppercase">Auction Panel</p>
+        <h1 className="text-sm font-bold tracking-tight text-foreground">JP CENTER</h1>
+        <p className="text-[9px] text-foreground0 font-medium tracking-wider uppercase">Auction Panel</p>
       </div>
     </div>
   );
@@ -65,13 +65,13 @@ export function CustomerSidebar() {
   return (
     <aside className="w-[180px] flex-shrink-0 border-r border-border bg-background flex-col hidden md:flex">
       <SidebarBrand />
-      <div className="h-px bg-zinc-800 mx-3" />
+      <div className="h-px bg-muted mx-3" />
       <ScrollArea className="flex-1">
         <NavItems />
       </ScrollArea>
-      <div className="h-px bg-zinc-800 mx-3" />
+      <div className="h-px bg-muted mx-3" />
       <div className="px-4 py-3">
-        <p className="text-[9px] text-zinc-600 text-center tracking-wide">SS Holdings</p>
+        <p className="text-[9px] text-muted-foreground/40 text-center tracking-wide">SS Holdings</p>
       </div>
     </aside>
   );
@@ -82,12 +82,12 @@ export function MobileNav() {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger className="md:hidden p-1.5 -ml-1 rounded hover:bg-zinc-800 transition-colors">
-        <Menu className="h-5 w-5 text-zinc-400" />
+      <SheetTrigger className="md:hidden p-1.5 -ml-1 rounded hover:bg-muted transition-colors">
+        <Menu className="h-5 w-5 text-muted-foreground" />
       </SheetTrigger>
       <SheetContent side="left" className="w-[220px] p-0 bg-background border-border">
         <SidebarBrand />
-        <div className="h-px bg-zinc-800 mx-3" />
+        <div className="h-px bg-muted mx-3" />
         <ScrollArea className="flex-1">
           <NavItems onNavigate={() => setOpen(false)} />
         </ScrollArea>

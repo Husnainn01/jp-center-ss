@@ -51,13 +51,13 @@ export default async function CustomerVehicleDetail({ params }: Props) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-xl font-bold tracking-tight text-zinc-50">
+            <h1 className="text-xl font-bold tracking-tight text-foreground">
               {auction.maker} {auction.model}
             </h1>
-            <Badge variant="outline" className="text-[9px] font-mono border-border text-zinc-400">{auction.source?.toUpperCase()}</Badge>
+            <Badge variant="outline" className="text-[9px] font-mono border-border text-muted-foreground">{auction.source?.toUpperCase()}</Badge>
           </div>
           {auction.grade && (
-            <p className="text-sm text-zinc-500 mt-0.5">{auction.grade}</p>
+            <p className="text-sm text-foreground0 mt-0.5">{auction.grade}</p>
           )}
         </div>
 
@@ -75,20 +75,20 @@ export default async function CustomerVehicleDetail({ params }: Props) {
       {/* ──── Quick Specs Strip ──── */}
       <div className="flex flex-wrap gap-1.5">
         {auction.year && (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-zinc-800/50 text-xs text-zinc-300">
-            <Calendar className="h-3 w-3 text-zinc-500" />
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-muted/50 text-xs text-foreground/80">
+            <Calendar className="h-3 w-3 text-foreground0" />
             {auction.year}
           </span>
         )}
         {auction.mileage && (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-zinc-800/50 text-xs text-zinc-300">
-            <Gauge className="h-3 w-3 text-zinc-500" />
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-muted/50 text-xs text-foreground/80">
+            <Gauge className="h-3 w-3 text-foreground0" />
             {auction.mileage}
           </span>
         )}
         {auction.color && (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-zinc-800/50 text-xs text-zinc-300">
-            <Palette className="h-3 w-3 text-zinc-500" />
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-muted/50 text-xs text-foreground/80">
+            <Palette className="h-3 w-3 text-foreground0" />
             {auction.color}
           </span>
         )}
@@ -99,8 +99,8 @@ export default async function CustomerVehicleDetail({ params }: Props) {
           </span>
         )}
         {auction.engineSpecs && (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-zinc-800/50 text-xs text-zinc-300">
-            <Fuel className="h-3 w-3 text-zinc-500" />
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-border bg-muted/50 text-xs text-foreground/80">
+            <Fuel className="h-3 w-3 text-foreground0" />
             {auction.engineSpecs}
           </span>
         )}
@@ -119,16 +119,16 @@ export default async function CustomerVehicleDetail({ params }: Props) {
         {/* Auction Sheet — wider */}
         <div className="lg:col-span-3">
           <div className="bg-card border border-border rounded p-4">
-            <h2 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500 mb-3">
+            <h2 className="text-[10px] font-semibold uppercase tracking-widest text-foreground0 mb-3">
               Inspection Sheet
             </h2>
             {exhibitSheetUrl ? (
               <ImageCarousel images={[exhibitSheetUrl]} alt="Auction sheet" />
             ) : (
-              <div className="aspect-[4/3] rounded bg-zinc-800/50 border border-dashed border-border flex items-center justify-center">
+              <div className="aspect-[4/3] rounded bg-muted/50 border border-dashed border-border flex items-center justify-center">
                 <div className="text-center">
-                  <Shield className="h-6 w-6 mx-auto text-zinc-700 mb-2" />
-                  <p className="text-xs text-zinc-600">Not available</p>
+                  <Shield className="h-6 w-6 mx-auto text-muted-foreground/40 mb-2" />
+                  <p className="text-xs text-muted-foreground/60">Not available</p>
                 </div>
               </div>
             )}
@@ -140,7 +140,7 @@ export default async function CustomerVehicleDetail({ params }: Props) {
 
           {/* Specifications */}
           <div className="bg-card border border-border rounded p-4">
-            <h2 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500 mb-3">
+            <h2 className="text-[10px] font-semibold uppercase tracking-widest text-foreground0 mb-3">
               Specifications
             </h2>
             <div className="divide-y divide-border">
@@ -154,11 +154,11 @@ export default async function CustomerVehicleDetail({ params }: Props) {
                 { icon: Clock, label: "Inspection", value: auction.inspectionExpiry },
               ].map((item) => (
                 <div key={item.label} className="flex items-center justify-between py-2">
-                  <span className="flex items-center gap-2 text-xs text-zinc-500">
+                  <span className="flex items-center gap-2 text-xs text-foreground0">
                     <item.icon className="h-3 w-3" />
                     {item.label}
                   </span>
-                  <span className="text-xs font-medium text-zinc-200">{item.value || "—"}</span>
+                  <span className="text-xs font-medium text-foreground/90">{item.value || "—"}</span>
                 </div>
               ))}
             </div>
@@ -166,7 +166,7 @@ export default async function CustomerVehicleDetail({ params }: Props) {
 
           {/* Auction Details */}
           <div className="bg-card border border-border rounded p-4">
-            <h2 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500 mb-3">
+            <h2 className="text-[10px] font-semibold uppercase tracking-widest text-foreground0 mb-3">
               Auction Info
             </h2>
             <div className="divide-y divide-border">
@@ -177,11 +177,11 @@ export default async function CustomerVehicleDetail({ params }: Props) {
                 { icon: Calendar, label: "Date", value: auction.auctionDate },
               ].map((item) => (
                 <div key={item.label} className="flex items-center justify-between py-2">
-                  <span className="flex items-center gap-2 text-xs text-zinc-500">
+                  <span className="flex items-center gap-2 text-xs text-foreground0">
                     <item.icon className="h-3 w-3" />
                     {item.label}
                   </span>
-                  <span className="text-xs font-medium text-zinc-200 text-right max-w-[55%]">{item.value || "—"}</span>
+                  <span className="text-xs font-medium text-foreground/90 text-right max-w-[55%]">{item.value || "—"}</span>
                 </div>
               ))}
             </div>

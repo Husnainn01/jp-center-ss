@@ -22,7 +22,7 @@ interface FilterOptions {
   auctionDays?: DayOption[];
 }
 
-const sel = "h-8 rounded border border-border bg-card px-2.5 text-xs text-zinc-200 w-full focus:outline-none focus:ring-1 focus:ring-blue-500/40 focus:border-blue-500/40 cursor-pointer appearance-none transition-colors hover:border-zinc-600";
+const sel = "h-8 rounded border border-border bg-card px-2.5 text-xs text-foreground/90 w-full focus:outline-none focus:ring-1 focus:ring-blue-500/40 focus:border-blue-500/40 cursor-pointer appearance-none transition-colors hover:border-ring/30";
 
 function formatDayLabel(dateStr: string): { label: string; day: string; weekday: string } {
   const d = new Date(dateStr + "T00:00:00");
@@ -245,15 +245,15 @@ function Content() {
     return (
       <div className="space-y-3">
         <div className="flex items-center gap-3">
-          <div className="h-5 w-32 bg-zinc-800 animate-pulse rounded" />
-          <div className="h-5 w-16 bg-zinc-800 animate-pulse rounded" />
+          <div className="h-5 w-32 bg-muted animate-pulse rounded" />
+          <div className="h-5 w-16 bg-muted animate-pulse rounded" />
         </div>
         <div className="flex gap-2">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-14 w-16 bg-zinc-800 animate-pulse rounded" />
+            <div key={i} className="h-14 w-16 bg-muted animate-pulse rounded" />
           ))}
         </div>
-        <div className="h-20 bg-zinc-800/50 animate-pulse rounded" />
+        <div className="h-20 bg-muted/50 animate-pulse rounded" />
         <div className="space-y-px">
           {Array.from({ length: 12 }).map((_, i) => (
             <div key={i} className="h-10 bg-card animate-pulse" />
@@ -268,17 +268,17 @@ function Content() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-base font-bold tracking-tight text-zinc-100">Vehicles</h1>
-          <span className="text-[11px] text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded font-mono">
+          <h1 className="text-base font-bold tracking-tight text-foreground">Vehicles</h1>
+          <span className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded font-mono">
             {total.toLocaleString()}
           </span>
         </div>
         <div className="flex items-center gap-1">
           <div className="flex border border-border rounded overflow-hidden h-7">
-            <button onClick={() => setViewMode("grid")} className={`px-2 transition-colors ${viewMode === "grid" ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"}`}>
+            <button onClick={() => setViewMode("grid")} className={`px-2 transition-colors ${viewMode === "grid" ? "bg-accent text-foreground" : "text-muted-foreground/70 hover:text-foreground/80 hover:bg-muted"}`}>
               <LayoutGrid className="h-3.5 w-3.5" />
             </button>
-            <button onClick={() => setViewMode("list")} className={`px-2 transition-colors ${viewMode === "list" ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"}`}>
+            <button onClick={() => setViewMode("list")} className={`px-2 transition-colors ${viewMode === "list" ? "bg-accent text-foreground" : "text-muted-foreground/70 hover:text-foreground/80 hover:bg-muted"}`}>
               <AlignJustify className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -293,7 +293,7 @@ function Content() {
             className={`flex-shrink-0 px-3 py-1.5 rounded border text-xs font-medium transition-all ${
               !get("auctionDay")
                 ? "bg-blue-500 text-white border-blue-500"
-                : "bg-card text-zinc-400 border-border hover:text-zinc-200 hover:border-zinc-600"
+                : "bg-card text-muted-foreground border-border hover:text-foreground/90 hover:border-ring/30"
             }`}
           >
             All
@@ -308,7 +308,7 @@ function Content() {
                 className={`flex-shrink-0 min-w-[60px] px-2.5 py-1.5 rounded border text-center transition-all ${
                   isSelected
                     ? "bg-blue-500 text-white border-blue-500"
-                    : "bg-card text-zinc-400 border-border hover:text-zinc-200 hover:border-zinc-600"
+                    : "bg-card text-muted-foreground border-border hover:text-foreground/90 hover:border-ring/30"
                 }`}
               >
                 <div className="text-[9px] font-medium opacity-70">{label}</div>
@@ -403,8 +403,8 @@ function Content() {
         {/* Clear filters */}
         {activeFilters > 0 && (
           <div className="flex items-center justify-between pt-1">
-            <span className="text-[11px] text-zinc-500">{activeFilters} filter{activeFilters > 1 ? "s" : ""}</span>
-            <button onClick={clearAll} className="h-7 px-2.5 rounded border border-border text-zinc-400 text-[11px] font-medium hover:text-zinc-200 hover:border-zinc-600 transition-colors flex items-center gap-1.5">
+            <span className="text-[11px] text-muted-foreground/70">{activeFilters} filter{activeFilters > 1 ? "s" : ""}</span>
+            <button onClick={clearAll} className="h-7 px-2.5 rounded border border-border text-muted-foreground text-[11px] font-medium hover:text-foreground/90 hover:border-ring/30 transition-colors flex items-center gap-1.5">
               <X className="h-3 w-3" /> Clear
             </button>
           </div>
@@ -415,16 +415,16 @@ function Content() {
       <div className="relative">
         {/* Loading overlay */}
         {loading && !initialLoad && (
-          <div className="absolute inset-0 bg-zinc-950/60 z-10 flex items-center justify-center rounded">
-            <Loader2 className="h-5 w-5 animate-spin text-zinc-500" />
+          <div className="absolute inset-0 bg-background/60 z-10 flex items-center justify-center rounded">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/70" />
           </div>
         )}
 
         {/* Empty state */}
         {auctions.length === 0 && !loading ? (
           <div className="py-16 text-center">
-            <Car className="h-8 w-8 mx-auto text-zinc-700 mb-3" />
-            <p className="text-sm text-zinc-500">No vehicles match your filters</p>
+            <Car className="h-8 w-8 mx-auto text-muted-foreground/30 mb-3" />
+            <p className="text-sm text-muted-foreground/70">No vehicles match your filters</p>
             {activeFilters > 0 && (
               <button onClick={clearAll} className="text-xs text-blue-400 hover:text-blue-300 mt-2">Clear all filters</button>
             )}
@@ -434,12 +434,12 @@ function Content() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             {auctions.map(a => (
               <Link key={a.id} href={`/dashboard/${a.id}`} className="group">
-                <div className="bg-card border border-border rounded overflow-hidden hover:border-zinc-600 transition-all duration-100">
-                  <div className="aspect-[16/10] bg-zinc-800 relative overflow-hidden">
+                <div className="bg-card border border-border rounded overflow-hidden hover:border-ring/30 transition-all duration-100">
+                  <div className="aspect-[16/10] bg-muted relative overflow-hidden">
                     {a.imageUrl ? (
                       <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="(max-width: 640px) 50vw, 25vw" loading="lazy" unoptimized />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-zinc-700"><Car className="h-5 w-5" /></div>
+                      <div className="w-full h-full flex items-center justify-center text-muted-foreground/30"><Car className="h-5 w-5" /></div>
                     )}
                     {a.rating && (
                       <span className="absolute top-1 right-1 text-[9px] font-mono font-bold bg-blue-500/90 text-white px-1.5 py-0.5 rounded-sm">
@@ -448,18 +448,18 @@ function Content() {
                     )}
                   </div>
                   <div className="p-2.5 space-y-1">
-                    <p className="text-xs font-semibold truncate text-zinc-100 group-hover:text-blue-400 transition-colors">
+                    <p className="text-xs font-semibold truncate text-foreground group-hover:text-blue-400 transition-colors">
                       {a.maker || "Unknown"} {a.model || "Vehicle"}
                     </p>
-                    <p className="text-[10px] text-zinc-500 truncate">
+                    <p className="text-[10px] text-muted-foreground/70 truncate">
                       {[a.year, a.mileage, a.color].filter(Boolean).join(" · ")}
                     </p>
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono font-bold text-zinc-100">
+                      <span className="text-xs font-mono font-bold text-foreground">
                         {a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}
                       </span>
                     </div>
-                    <p className="text-[9px] text-zinc-600 truncate">{a.auctionHouse} · {a.auctionDate}</p>
+                    <p className="text-[9px] text-muted-foreground/50 truncate">{a.auctionHouse} · {a.auctionDate}</p>
                   </div>
                 </div>
               </Link>
@@ -471,47 +471,47 @@ function Content() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-card">
-                  <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-3 py-2 w-[50px]"></th>
-                  <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-2 py-2">Vehicle</th>
-                  <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-2 py-2 hidden md:table-cell">Auction</th>
-                  <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-2 py-2 hidden lg:table-cell">Specs</th>
-                  <th className="text-center font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-2 py-2 hidden sm:table-cell w-[52px]">Score</th>
-                  <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-2 py-2 hidden lg:table-cell">Date</th>
-                  <th className="text-right font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-3 py-2">Price</th>
+                  <th className="text-left font-medium text-muted-foreground/70 uppercase text-[10px] tracking-wider px-3 py-2 w-[50px]"></th>
+                  <th className="text-left font-medium text-muted-foreground/70 uppercase text-[10px] tracking-wider px-2 py-2">Vehicle</th>
+                  <th className="text-left font-medium text-muted-foreground/70 uppercase text-[10px] tracking-wider px-2 py-2 hidden md:table-cell">Auction</th>
+                  <th className="text-left font-medium text-muted-foreground/70 uppercase text-[10px] tracking-wider px-2 py-2 hidden lg:table-cell">Specs</th>
+                  <th className="text-center font-medium text-muted-foreground/70 uppercase text-[10px] tracking-wider px-2 py-2 hidden sm:table-cell w-[52px]">Score</th>
+                  <th className="text-left font-medium text-muted-foreground/70 uppercase text-[10px] tracking-wider px-2 py-2 hidden lg:table-cell">Date</th>
+                  <th className="text-right font-medium text-muted-foreground/70 uppercase text-[10px] tracking-wider px-3 py-2">Price</th>
                 </tr>
               </thead>
               <tbody>
                 {auctions.map(a => (
-                  <tr key={a.id} className="border-b border-border/50 last:border-0 hover:bg-zinc-800/40 transition-colors cursor-pointer group relative">
+                  <tr key={a.id} className="border-b border-border/50 last:border-0 hover:bg-muted/40 transition-colors cursor-pointer group relative">
                     <td className="px-3 py-1.5">
                       <Link href={`/dashboard/${a.id}`} className="absolute inset-0 z-[1]" aria-label={`${a.maker || ""} ${a.model || "Vehicle"}`} />
-                      <div className="w-[44px] h-[32px] rounded-sm overflow-hidden bg-zinc-800 relative">
+                      <div className="w-[44px] h-[32px] rounded-sm overflow-hidden bg-muted relative">
                         {a.imageUrl ? (
                           <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="44px" loading="lazy" unoptimized />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-zinc-700"><Car className="h-3 w-3" /></div>
+                          <div className="w-full h-full flex items-center justify-center text-muted-foreground/30"><Car className="h-3 w-3" /></div>
                         )}
                       </div>
                     </td>
                     <td className="px-2 py-1.5">
-                      <p className="font-medium truncate max-w-[220px] text-zinc-100 group-hover:text-blue-400 transition-colors">{a.maker || "—"} {a.model || ""}</p>
-                      <p className="text-[10px] text-zinc-600 truncate">{a.grade || ""}</p>
+                      <p className="font-medium truncate max-w-[220px] text-foreground group-hover:text-blue-400 transition-colors">{a.maker || "—"} {a.model || ""}</p>
+                      <p className="text-[10px] text-muted-foreground/50 truncate">{a.grade || ""}</p>
                     </td>
                     <td className="px-2 py-1.5 hidden md:table-cell">
-                      <p className="truncate max-w-[140px] text-zinc-300">{a.auctionHouse}</p>
-                      <p className="text-[10px] text-zinc-600">{a.location}</p>
+                      <p className="truncate max-w-[140px] text-foreground/80">{a.auctionHouse}</p>
+                      <p className="text-[10px] text-muted-foreground/50">{a.location}</p>
                     </td>
-                    <td className="px-2 py-1.5 hidden lg:table-cell text-zinc-500 text-[11px]">
+                    <td className="px-2 py-1.5 hidden lg:table-cell text-muted-foreground/70 text-[11px]">
                       {[a.year, a.mileage, a.color].filter(Boolean).join(" · ")}
                     </td>
                     <td className="px-2 py-1.5 text-center hidden sm:table-cell">
                       {a.rating && <span className="text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded-sm">{a.rating}</span>}
                     </td>
-                    <td className="px-2 py-1.5 hidden lg:table-cell text-zinc-500 text-[10px] font-mono">
+                    <td className="px-2 py-1.5 hidden lg:table-cell text-muted-foreground/70 text-[10px] font-mono">
                       {a.auctionDate}
                     </td>
                     <td className="px-3 py-1.5 text-right">
-                      <span className="font-mono font-bold text-zinc-100">{a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}</span>
+                      <span className="font-mono font-bold text-foreground">{a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}</span>
                     </td>
                   </tr>
                 ))}
@@ -524,23 +524,23 @@ function Content() {
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-zinc-500 font-mono">
+          <span className="text-[11px] text-muted-foreground/70 font-mono">
             {(page - 1) * 40 + 1}–{Math.min(page * 40, total)} of {total.toLocaleString()}
           </span>
           <div className="flex items-center gap-0.5">
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800" disabled={page <= 1} onClick={() => goPage(page - 1)}>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground/90 hover:bg-muted" disabled={page <= 1} onClick={() => goPage(page - 1)}>
               <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
             {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
               const p = page <= 3 ? i + 1 : page + i - 2;
               if (p < 1 || p > totalPages) return null;
               return (
-                <Button key={p} variant={p === page ? "default" : "ghost"} size="sm" className={`h-7 w-7 p-0 text-[11px] font-mono ${p === page ? "bg-blue-500 text-white hover:bg-blue-600" : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"}`} onClick={() => goPage(p)}>
+                <Button key={p} variant={p === page ? "default" : "ghost"} size="sm" className={`h-7 w-7 p-0 text-[11px] font-mono ${p === page ? "bg-blue-500 text-white hover:bg-blue-600" : "text-muted-foreground hover:text-foreground/90 hover:bg-muted"}`} onClick={() => goPage(p)}>
                   {p}
                 </Button>
               );
             })}
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800" disabled={page >= totalPages} onClick={() => goPage(page + 1)}>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground/90 hover:bg-muted" disabled={page >= totalPages} onClick={() => goPage(page + 1)}>
               <ChevronRight className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -555,15 +555,15 @@ export function CustomerAuctions() {
     <Suspense fallback={
       <div className="space-y-3">
         <div className="flex items-center gap-3">
-          <div className="h-5 w-32 bg-zinc-800 animate-pulse rounded" />
-          <div className="h-5 w-16 bg-zinc-800 animate-pulse rounded" />
+          <div className="h-5 w-32 bg-muted animate-pulse rounded" />
+          <div className="h-5 w-16 bg-muted animate-pulse rounded" />
         </div>
         <div className="flex gap-1.5">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-12 w-14 bg-zinc-800 animate-pulse rounded" />
+            <div key={i} className="h-12 w-14 bg-muted animate-pulse rounded" />
           ))}
         </div>
-        <div className="h-16 bg-zinc-800/50 animate-pulse rounded" />
+        <div className="h-16 bg-muted/50 animate-pulse rounded" />
         <div className="space-y-px">
           {Array.from({ length: 12 }).map((_, i) => (
             <div key={i} className="h-10 bg-card animate-pulse" />

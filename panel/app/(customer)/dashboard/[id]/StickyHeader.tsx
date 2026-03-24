@@ -51,11 +51,11 @@ export function StickyHeader({ auctionId, title, price }: Props) {
           {/* Left: Vehicle info */}
           <div className="flex items-center gap-3 min-w-0">
             {index !== -1 && (
-              <span className="text-[11px] font-mono text-zinc-500 flex-shrink-0">
+              <span className="text-[11px] font-mono text-muted-foreground flex-shrink-0">
                 {index + 1}/{totalCount}
               </span>
             )}
-            <p className="text-sm font-semibold truncate text-zinc-100">{title}</p>
+            <p className="text-sm font-semibold truncate text-foreground">{title}</p>
             {price && (
               <span className="text-sm font-mono font-bold text-blue-400 flex-shrink-0">
                 {formatPrice(price)}
