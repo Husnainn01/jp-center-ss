@@ -18,7 +18,7 @@ const PROXY_PATHS = [
   "/api/s3-image",
 ];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Only proxy API routes that should go to the backend
