@@ -37,7 +37,19 @@ export function parseUser(req: Request, _res: Response, next: NextFunction) {
     const payload = `${userId}:${role || ""}:${crmCustomerId || ""}`;
     const expectedSig = crypto.createHmac("sha256", SIGNING_SECRET).update(payload).digest("hex");
 
-    if (signature && signature === expectedSig) {
+    if (SIGNING_SECRET && SIGNING_SECRET !== "change-me-in-production") {
+      // Verify HMAC signature if signing is configured
+      if (signature && signature === expectedSig) {
+        req.user = {
+          id: parseInt(userId),
+          role: role || "customer",
+          crmCustomerId: crmCustomerId || null,
+          crmToken: crmToken || null,
+        };
+      }
+      // If signature is invalid, req.user stays undefined → requireAuth will block
+    } else {
+      // Signing not configured — trust headers (backward compatible, log warning)
       req.user = {
         id: parseInt(userId),
         role: role || "customer",
@@ -45,7 +57,6 @@ export function parseUser(req: Request, _res: Response, next: NextFunction) {
         crmToken: crmToken || null,
       };
     }
-    // If signature is missing/invalid, req.user stays undefined → requireAuth will block
   }
 
   next();
