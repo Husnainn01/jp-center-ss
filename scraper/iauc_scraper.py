@@ -283,7 +283,11 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
             batch_ids = []
             page_num = 0
             consecutive_all_existing = 0  # track pages with 0 new vehicles
-            MAX_CONSECUTIVE_EXISTING = 5  # skip rest of batch after 5 pages with nothing new
+            # Scale early exit threshold based on batch size:
+            # Small batches (<500): exit after 3 all-existing pages (300 vehicles checked)
+            # Medium batches (500-5000): exit after 10 pages (1000 vehicles checked)
+            # Large batches (5000+): exit after 20 pages (2000 vehicles checked)
+            MAX_CONSECUTIVE_EXISTING = 3 if batch_total < 500 else 10 if batch_total < 5000 else 20
             while True:
                 page_num += 1
 
