@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import {
   ChevronLeft, ChevronRight, Car, LayoutGrid, AlignJustify, X, Calendar, Loader2,
 } from "lucide-react";
+import { useNavigationContext } from "../components/NavigationContext";
 
 interface FilterOption { value: string; count: number }
 interface DayOption { date: string; count: number }
@@ -21,7 +22,7 @@ interface FilterOptions {
   auctionDays?: DayOption[];
 }
 
-const sel = "h-9 rounded-md border border-input bg-card px-3 text-xs w-full focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary cursor-pointer appearance-none";
+const sel = "h-8 rounded border border-zinc-700 bg-zinc-900 px-2.5 text-xs text-zinc-200 w-full focus:outline-none focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500/50 cursor-pointer appearance-none";
 
 function formatDayLabel(dateStr: string): { label: string; day: string; weekday: string } {
   const d = new Date(dateStr + "T00:00:00");
@@ -63,6 +64,7 @@ function buildQueryString(sp: URLSearchParams, includeMeta: boolean): string {
 function Content() {
   const router = useRouter();
   const sp = useSearchParams();
+  const navCtx = useNavigationContext();
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [models, setModels] = useState<FilterOption[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -114,6 +116,16 @@ function Content() {
         if (includeMeta && data.filterOptions) {
           setFilterOptions(prev => ({ ...prev, ...data.filterOptions }));
           dropdownMetaLoaded.current = true;
+        }
+
+        // Populate navigation context for prev/next on detail pages
+        if (data.auctions?.length && navCtx) {
+          navCtx.setVehicleList(
+            data.auctions.map((a: AuctionSerialized) => a.id),
+            searchParams.toString(),
+            data.page || 1,
+            data.total || 0,
+          );
         }
 
         setLoading(false);
@@ -231,22 +243,20 @@ function Content() {
   // Skeleton for initial load
   if (initialLoad) {
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-6 w-36 bg-muted animate-pulse rounded" />
-            <div className="h-6 w-20 bg-muted animate-pulse rounded-full" />
-          </div>
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="h-5 w-32 bg-zinc-800 animate-pulse rounded" />
+          <div className="h-5 w-16 bg-zinc-800 animate-pulse rounded" />
         </div>
         <div className="flex gap-2">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-16 w-20 bg-muted animate-pulse rounded-lg" />
+            <div key={i} className="h-14 w-16 bg-zinc-800 animate-pulse rounded" />
           ))}
         </div>
-        <div className="h-24 bg-muted animate-pulse rounded-lg" />
-        <div className="space-y-1">
-          {Array.from({ length: 10 }).map((_, i) => (
-            <div key={i} className="h-12 bg-muted/50 animate-pulse rounded" />
+        <div className="h-20 bg-zinc-800/50 animate-pulse rounded" />
+        <div className="space-y-px">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div key={i} className="h-10 bg-zinc-900 animate-pulse" />
           ))}
         </div>
       </div>
@@ -258,17 +268,17 @@ function Content() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold tracking-tight">Auction Vehicles</h1>
-          <span className="text-xs text-muted-foreground bg-muted px-2.5 py-1 rounded-full font-medium">
-            {total.toLocaleString()} vehicles
+          <h1 className="text-base font-bold tracking-tight text-zinc-100">Vehicles</h1>
+          <span className="text-[11px] text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded font-mono">
+            {total.toLocaleString()}
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex border rounded-md overflow-hidden h-8">
-            <button onClick={() => setViewMode("grid")} className={`px-2.5 transition-colors ${viewMode === "grid" ? "bg-foreground text-background" : "hover:bg-accent"}`}>
+        <div className="flex items-center gap-1">
+          <div className="flex border border-zinc-700 rounded overflow-hidden h-7">
+            <button onClick={() => setViewMode("grid")} className={`px-2 transition-colors ${viewMode === "grid" ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"}`}>
               <LayoutGrid className="h-3.5 w-3.5" />
             </button>
-            <button onClick={() => setViewMode("list")} className={`px-2.5 transition-colors ${viewMode === "list" ? "bg-foreground text-background" : "hover:bg-accent"}`}>
+            <button onClick={() => setViewMode("list")} className={`px-2 transition-colors ${viewMode === "list" ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"}`}>
               <AlignJustify className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -277,47 +287,41 @@ function Content() {
 
       {/* Auction Day Picker */}
       {auctionDays.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Auction Days</span>
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            <button
-              onClick={() => update({ auctionDay: "" })}
-              className={`flex-shrink-0 px-4 py-2.5 rounded-lg border text-xs font-medium transition-all ${
-                !get("auctionDay")
-                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                  : "bg-card hover:bg-accent border-input"
-              }`}
-            >
-              All Days
-            </button>
-            {auctionDays.map(d => {
-              const { label, day } = formatDayLabel(d.date);
-              const isSelected = get("auctionDay") === d.date;
-              return (
-                <button
-                  key={d.date}
-                  onClick={() => update({ auctionDay: isSelected ? "" : d.date })}
-                  className={`flex-shrink-0 min-w-[80px] px-3 py-2 rounded-lg border text-center transition-all ${
-                    isSelected
-                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                      : "bg-card hover:bg-accent border-input"
-                  }`}
-                >
-                  <div className="text-[10px] font-medium opacity-70">{label}</div>
-                  <div className="text-lg font-bold leading-tight">{day}</div>
-                  <div className="text-[10px] opacity-60">{d.count.toLocaleString()}</div>
-                </button>
-              );
-            })}
-          </div>
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          <button
+            onClick={() => update({ auctionDay: "" })}
+            className={`flex-shrink-0 px-3 py-1.5 rounded border text-xs font-medium transition-all ${
+              !get("auctionDay")
+                ? "bg-blue-500 text-white border-blue-500"
+                : "bg-zinc-900 text-zinc-400 border-zinc-700 hover:text-zinc-200 hover:border-zinc-600"
+            }`}
+          >
+            All
+          </button>
+          {auctionDays.map(d => {
+            const { label, day } = formatDayLabel(d.date);
+            const isSelected = get("auctionDay") === d.date;
+            return (
+              <button
+                key={d.date}
+                onClick={() => update({ auctionDay: isSelected ? "" : d.date })}
+                className={`flex-shrink-0 min-w-[60px] px-2.5 py-1.5 rounded border text-center transition-all ${
+                  isSelected
+                    ? "bg-blue-500 text-white border-blue-500"
+                    : "bg-zinc-900 text-zinc-400 border-zinc-700 hover:text-zinc-200 hover:border-zinc-600"
+                }`}
+              >
+                <div className="text-[9px] font-medium opacity-70">{label}</div>
+                <div className="text-sm font-bold leading-tight">{day}</div>
+                <div className="text-[9px] font-mono opacity-50">{d.count}</div>
+              </button>
+            );
+          })}
         </div>
       )}
 
       {/* Filters */}
-      <div className="bg-card border rounded-lg p-4 space-y-3">
+      <div className="bg-zinc-900 border border-zinc-800 rounded p-3 space-y-2.5">
         {/* Row 1: Make, Model, Chassis Code, Year range */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <select value={get("maker")} onChange={e => update({ maker: e.target.value })} className={sel}>
@@ -399,9 +403,9 @@ function Content() {
         {/* Clear filters */}
         {activeFilters > 0 && (
           <div className="flex items-center justify-between pt-1">
-            <span className="text-xs text-muted-foreground">{activeFilters} filter{activeFilters > 1 ? "s" : ""} active</span>
-            <button onClick={clearAll} className="h-8 px-3 rounded-md border border-destructive/30 text-destructive text-xs font-medium hover:bg-destructive/5 transition-colors flex items-center gap-1.5">
-              <X className="h-3 w-3" /> Clear All Filters
+            <span className="text-[11px] text-zinc-500">{activeFilters} filter{activeFilters > 1 ? "s" : ""}</span>
+            <button onClick={clearAll} className="h-7 px-2.5 rounded border border-zinc-700 text-zinc-400 text-[11px] font-medium hover:text-zinc-200 hover:border-zinc-600 transition-colors flex items-center gap-1.5">
+              <X className="h-3 w-3" /> Clear
             </button>
           </div>
         )}
@@ -409,105 +413,105 @@ function Content() {
 
       {/* Table/Grid with loading overlay */}
       <div className="relative">
-        {/* Loading overlay — shown over existing data during refetch */}
+        {/* Loading overlay */}
         {loading && !initialLoad && (
-          <div className="absolute inset-0 bg-background/60 z-10 flex items-center justify-center rounded-lg">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <div className="absolute inset-0 bg-zinc-950/60 z-10 flex items-center justify-center rounded">
+            <Loader2 className="h-5 w-5 animate-spin text-zinc-500" />
           </div>
         )}
 
         {/* Empty state */}
         {auctions.length === 0 && !loading ? (
-          <div className="py-20 text-center">
-            <Car className="h-10 w-10 mx-auto text-muted-foreground/20 mb-3" />
-            <p className="text-sm text-muted-foreground">No vehicles match your filters</p>
+          <div className="py-16 text-center">
+            <Car className="h-8 w-8 mx-auto text-zinc-700 mb-3" />
+            <p className="text-sm text-zinc-500">No vehicles match your filters</p>
             {activeFilters > 0 && (
-              <button onClick={clearAll} className="text-xs text-primary hover:underline mt-2">Clear all filters</button>
+              <button onClick={clearAll} className="text-xs text-blue-400 hover:text-blue-300 mt-2">Clear all filters</button>
             )}
           </div>
         ) : viewMode === "grid" ? (
           /* Grid */
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             {auctions.map(a => (
               <Link key={a.id} href={`/dashboard/${a.id}`} className="group">
-                <div className="bg-card border rounded-lg overflow-hidden hover:shadow-md hover:border-primary/20 transition-all duration-150">
-                  <div className="aspect-[16/10] bg-muted relative overflow-hidden">
+                <div className="bg-zinc-900 border border-zinc-800 rounded overflow-hidden hover:border-zinc-600 transition-all duration-100">
+                  <div className="aspect-[16/10] bg-zinc-800 relative overflow-hidden">
                     {a.imageUrl ? (
-                      <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover group-hover:scale-[1.03] transition-transform duration-200" sizes="(max-width: 640px) 50vw, 25vw" loading="lazy" unoptimized />
+                      <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="(max-width: 640px) 50vw, 25vw" loading="lazy" unoptimized />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-muted-foreground/20"><Car className="h-6 w-6" /></div>
+                      <div className="w-full h-full flex items-center justify-center text-zinc-700"><Car className="h-5 w-5" /></div>
                     )}
                     {a.rating && (
-                      <span className="absolute top-1.5 right-1.5 text-[9px] font-bold bg-black/60 text-white px-1.5 py-0.5 rounded">
+                      <span className="absolute top-1 right-1 text-[9px] font-mono font-bold bg-blue-500/90 text-white px-1.5 py-0.5 rounded-sm">
                         {a.rating}
                       </span>
                     )}
                   </div>
-                  <div className="p-3 space-y-1.5">
-                    <p className="text-sm font-semibold truncate leading-tight group-hover:text-primary transition-colors">
+                  <div className="p-2.5 space-y-1">
+                    <p className="text-xs font-semibold truncate text-zinc-100 group-hover:text-blue-400 transition-colors">
                       {a.maker || "Unknown"} {a.model || "Vehicle"}
                     </p>
-                    <p className="text-xs text-muted-foreground truncate">
+                    <p className="text-[10px] text-zinc-500 truncate">
                       {[a.year, a.mileage, a.color].filter(Boolean).join(" · ")}
                     </p>
-                    <div className="flex items-center justify-between pt-0.5">
-                      <span className="text-sm font-bold">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono font-bold text-zinc-100">
                         {a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}
                       </span>
                     </div>
-                    <p className="text-[10px] text-muted-foreground truncate">{a.auctionHouse} · {a.auctionDate}</p>
+                    <p className="text-[9px] text-zinc-600 truncate">{a.auctionHouse} · {a.auctionDate}</p>
                   </div>
                 </div>
               </Link>
             ))}
           </div>
         ) : (
-          /* List — data-dense table */
-          <div className="bg-card border rounded-lg overflow-hidden">
+          /* List — dark dense table */
+          <div className="bg-zinc-900 border border-zinc-800 rounded overflow-hidden">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b bg-muted/40">
-                  <th className="text-left font-medium text-muted-foreground px-3 py-2.5 w-[56px]"></th>
-                  <th className="text-left font-medium text-muted-foreground px-2 py-2.5">Vehicle</th>
-                  <th className="text-left font-medium text-muted-foreground px-2 py-2.5 hidden md:table-cell">Auction</th>
-                  <th className="text-left font-medium text-muted-foreground px-2 py-2.5 hidden lg:table-cell">Specs</th>
-                  <th className="text-center font-medium text-muted-foreground px-2 py-2.5 hidden sm:table-cell w-[60px]">Score</th>
-                  <th className="text-left font-medium text-muted-foreground px-2 py-2.5 hidden lg:table-cell">Date</th>
-                  <th className="text-right font-medium text-muted-foreground px-3 py-2.5">Price</th>
+                <tr className="border-b border-zinc-800 bg-zinc-900">
+                  <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-3 py-2 w-[50px]"></th>
+                  <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-2 py-2">Vehicle</th>
+                  <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-2 py-2 hidden md:table-cell">Auction</th>
+                  <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-2 py-2 hidden lg:table-cell">Specs</th>
+                  <th className="text-center font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-2 py-2 hidden sm:table-cell w-[52px]">Score</th>
+                  <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-2 py-2 hidden lg:table-cell">Date</th>
+                  <th className="text-right font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-3 py-2">Price</th>
                 </tr>
               </thead>
               <tbody>
                 {auctions.map(a => (
-                  <tr key={a.id} className="border-b last:border-0 hover:bg-accent/40 transition-colors cursor-pointer group relative" onClick={() => router.push(`/dashboard/${a.id}`)}>
-                    <td className="px-3 py-2">
+                  <tr key={a.id} className="border-b border-zinc-800/50 last:border-0 hover:bg-zinc-800/40 transition-colors cursor-pointer group relative">
+                    <td className="px-3 py-1.5">
                       <Link href={`/dashboard/${a.id}`} className="absolute inset-0 z-[1]" aria-label={`${a.maker || ""} ${a.model || "Vehicle"}`} />
-                      <div className="w-[48px] h-[34px] rounded overflow-hidden bg-muted relative">
+                      <div className="w-[44px] h-[32px] rounded-sm overflow-hidden bg-zinc-800 relative">
                         {a.imageUrl ? (
-                          <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="48px" loading="lazy" unoptimized />
+                          <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="44px" loading="lazy" unoptimized />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-muted-foreground/20"><Car className="h-3.5 w-3.5" /></div>
+                          <div className="w-full h-full flex items-center justify-center text-zinc-700"><Car className="h-3 w-3" /></div>
                         )}
                       </div>
                     </td>
-                    <td className="px-2 py-2">
-                      <p className="font-medium truncate max-w-[220px] group-hover:text-primary transition-colors">{a.maker || "Unknown"} {a.model || "Vehicle"}</p>
-                      <p className="text-[10px] text-muted-foreground truncate">{a.grade || ""}</p>
+                    <td className="px-2 py-1.5">
+                      <p className="font-medium truncate max-w-[220px] text-zinc-100 group-hover:text-blue-400 transition-colors">{a.maker || "—"} {a.model || ""}</p>
+                      <p className="text-[10px] text-zinc-600 truncate">{a.grade || ""}</p>
                     </td>
-                    <td className="px-2 py-2 hidden md:table-cell">
-                      <p className="truncate max-w-[160px]">{a.auctionHouse}</p>
-                      <p className="text-[10px] text-muted-foreground">{a.location}</p>
+                    <td className="px-2 py-1.5 hidden md:table-cell">
+                      <p className="truncate max-w-[140px] text-zinc-300">{a.auctionHouse}</p>
+                      <p className="text-[10px] text-zinc-600">{a.location}</p>
                     </td>
-                    <td className="px-2 py-2 hidden lg:table-cell text-muted-foreground">
+                    <td className="px-2 py-1.5 hidden lg:table-cell text-zinc-500 text-[11px]">
                       {[a.year, a.mileage, a.color].filter(Boolean).join(" · ")}
                     </td>
-                    <td className="px-2 py-2 text-center hidden sm:table-cell">
-                      {a.rating && <span className="text-[10px] font-bold bg-muted px-1.5 py-0.5 rounded">{a.rating}</span>}
+                    <td className="px-2 py-1.5 text-center hidden sm:table-cell">
+                      {a.rating && <span className="text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded-sm">{a.rating}</span>}
                     </td>
-                    <td className="px-2 py-2 hidden lg:table-cell text-muted-foreground text-[10px]">
+                    <td className="px-2 py-1.5 hidden lg:table-cell text-zinc-500 text-[10px] font-mono">
                       {a.auctionDate}
                     </td>
-                    <td className="px-3 py-2 text-right">
-                      <span className="font-bold">{a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}</span>
+                    <td className="px-3 py-1.5 text-right">
+                      <span className="font-mono font-bold text-zinc-100">{a.startPrice ? formatPrice(parseFloat(a.startPrice)) : "—"}</span>
                     </td>
                   </tr>
                 ))}
@@ -520,24 +524,24 @@ function Content() {
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">
+          <span className="text-[11px] text-zinc-500 font-mono">
             {(page - 1) * 40 + 1}–{Math.min(page * 40, total)} of {total.toLocaleString()}
           </span>
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={page <= 1} onClick={() => goPage(page - 1)}>
-              <ChevronLeft className="h-4 w-4" />
+          <div className="flex items-center gap-0.5">
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800" disabled={page <= 1} onClick={() => goPage(page - 1)}>
+              <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
             {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
               const p = page <= 3 ? i + 1 : page + i - 2;
               if (p < 1 || p > totalPages) return null;
               return (
-                <Button key={p} variant={p === page ? "default" : "ghost"} size="sm" className="h-8 w-8 p-0 text-xs" onClick={() => goPage(p)}>
+                <Button key={p} variant={p === page ? "default" : "ghost"} size="sm" className={`h-7 w-7 p-0 text-[11px] font-mono ${p === page ? "bg-blue-500 text-white hover:bg-blue-600" : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"}`} onClick={() => goPage(p)}>
                   {p}
                 </Button>
               );
             })}
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={page >= totalPages} onClick={() => goPage(page + 1)}>
-              <ChevronRight className="h-4 w-4" />
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800" disabled={page >= totalPages} onClick={() => goPage(page + 1)}>
+              <ChevronRight className="h-3.5 w-3.5" />
             </Button>
           </div>
         </div>
@@ -549,22 +553,20 @@ function Content() {
 export function CustomerAuctions() {
   return (
     <Suspense fallback={
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-6 w-36 bg-muted animate-pulse rounded" />
-            <div className="h-6 w-20 bg-muted animate-pulse rounded-full" />
-          </div>
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="h-5 w-32 bg-zinc-800 animate-pulse rounded" />
+          <div className="h-5 w-16 bg-zinc-800 animate-pulse rounded" />
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-1.5">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-16 w-20 bg-muted animate-pulse rounded-lg" />
+            <div key={i} className="h-12 w-14 bg-zinc-800 animate-pulse rounded" />
           ))}
         </div>
-        <div className="h-24 bg-muted animate-pulse rounded-lg" />
-        <div className="space-y-1">
-          {Array.from({ length: 10 }).map((_, i) => (
-            <div key={i} className="h-12 bg-muted/50 animate-pulse rounded" />
+        <div className="h-16 bg-zinc-800/50 animate-pulse rounded" />
+        <div className="space-y-px">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div key={i} className="h-10 bg-zinc-900 animate-pulse" />
           ))}
         </div>
       </div>
