@@ -45,7 +45,7 @@ usersRouter.post("/", async (req, res) => {
       return;
     }
 
-    const hashed = await bcrypt.hash(password, 12);
+    const hashed = await bcrypt.hash(password, 14);
     const user = await prisma.user.create({
       data: { email, password: hashed, name, role: role === "admin" ? "admin" : "customer" },
       select: { id: true, email: true, name: true, role: true },
@@ -71,7 +71,7 @@ usersRouter.put("/", async (req, res) => {
     if (name !== undefined) data.name = name;
     if (role !== undefined) data.role = role;
     if (typeof isActive === "boolean") data.isActive = isActive;
-    if (password) data.password = await bcrypt.hash(password, 12);
+    if (password) data.password = await bcrypt.hash(password, 14);
 
     await prisma.user.update({ where: { id }, data });
     res.json({ success: true });

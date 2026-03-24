@@ -119,5 +119,9 @@ export const authOptions: NextAuthOptions = {
   },
   session: {
     strategy: "jwt",
+    maxAge: 24 * 60 * 60, // 1 day — force re-login after 24 hours
+  },
+  jwt: {
+    maxAge: 24 * 60 * 60, // 1 day
   },
 };

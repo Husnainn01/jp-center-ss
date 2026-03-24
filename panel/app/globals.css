@@ -150,6 +150,32 @@ body {
   background: #fafaf9;
 }
 
+/* Image protection — prevent copy, drag, save-as */
+img {
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+}
+/* Re-enable pointer on interactive images (carousel clicks) */
+img[data-interactive] {
+  pointer-events: auto;
+}
+
+/* Prevent text/image selection on protected areas */
+.no-select {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* Print protection — show blank page when printing */
+@media print {
+  body {
+    display: none !important;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

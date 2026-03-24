@@ -11,6 +11,7 @@ import { MobileBottomBar } from "./MobileBottomBar";
 import { ImageCarousel } from "../../../(admin)/components/ImageCarousel";
 import { AddToListButton } from "../../components/AddToListButton";
 import { SendForBiddingButton } from "../../components/SendForBiddingButton";
+import { ImageWatermark } from "../../components/ImageWatermark";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -107,19 +108,19 @@ export default async function CustomerVehicleDetail({ params }: Props) {
       </div>
 
       {/* ──── Car Photos ──── */}
-      <div className="bg-card border border-border rounded overflow-hidden p-3">
+      <ImageWatermark className="bg-card border border-border rounded overflow-hidden p-3">
         <div className="max-w-[600px] mx-auto">
           <ImageCarousel images={carImages} alt={`${auction.maker} ${auction.model}`} />
         </div>
-      </div>
+      </ImageWatermark>
 
       {/* ──── Two-Column: Auction Sheet + Details ──── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
 
         {/* Auction Sheet — wider */}
         <div className="lg:col-span-3">
-          <div className="bg-card border border-border rounded p-4">
-            <h2 className="text-[10px] font-semibold uppercase tracking-widest text-foreground0 mb-3">
+          <ImageWatermark className="bg-card border border-border rounded p-4">
+            <h2 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
               Inspection Sheet
             </h2>
             {exhibitSheetUrl ? (
@@ -132,7 +133,7 @@ export default async function CustomerVehicleDetail({ params }: Props) {
                 </div>
               </div>
             )}
-          </div>
+          </ImageWatermark>
         </div>
 
         {/* Vehicle + Auction Info */}

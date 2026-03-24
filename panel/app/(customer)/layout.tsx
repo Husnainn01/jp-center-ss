@@ -7,6 +7,7 @@ import { cache } from "react";
 import { CustomerSidebar, MobileNav } from "./CustomerNav";
 import { NavigationProvider } from "./components/NavigationContext";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { SecurityShield } from "./components/SecurityShield";
 
 const getSession = cache(() => getServerSession(authOptions));
 
@@ -56,6 +57,7 @@ export default async function CustomerLayout({
         </header>
 
         <main className="flex-1 overflow-y-auto bg-background">
+          <SecurityShield />
           <div className="p-3 md:p-4 max-w-[1600px]"><NavigationProvider>{children}</NavigationProvider></div>
         </main>
       </div>

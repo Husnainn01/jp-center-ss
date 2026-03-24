@@ -35,13 +35,14 @@ listsRouter.post("/", async (req, res) => {
   try {
     const userId = req.user!.id;
     const { name } = req.body;
-    if (!name?.trim()) {
+    const safeName = String(name || "").replace(/<[^>]*>/g, "").trim().slice(0, 100);
+    if (!safeName) {
       res.status(400).json({ error: "List name is required" });
       return;
     }
 
     const list = await prisma.carList.create({
-      data: { name: name.trim(), userId },
+      data: { name: safeName, userId },
     });
 
     res.status(201).json({
@@ -121,7 +122,13 @@ listsRouter.post("/:id/items", async (req, res) => {
   try {
     const userId = req.user!.id;
     const listId = parseInt(req.params.id);
-    const { auctionId, note } = req.body;
+    const auctionId = parseInt(String(req.body.auctionId));
+    const note = req.body.note ? String(req.body.note).replace(/<[^>]*>/g, "").trim().slice(0, 500) : null;
+
+    if (isNaN(listId) || isNaN(auctionId)) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
 
     const list = await prisma.carList.findFirst({ where: { id: listId, userId } });
     if (!list) {
@@ -137,7 +144,7 @@ listsRouter.post("/:id/items", async (req, res) => {
 
     try {
       const item = await prisma.carListItem.create({
-        data: { listId, auctionId, note: note || null },
+        data: { listId, auctionId, note },
       });
       res.status(201).json({ id: item.id, auctionId: item.auctionId });
     } catch {

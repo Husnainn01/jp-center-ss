@@ -10,10 +10,16 @@ export const authSyncRouter = Router();
  */
 authSyncRouter.post("/sync", async (req, res) => {
   try {
-    const { crmUserId, crmCustomerId, email, name, role } = req.body;
+    const { crmUserId, crmCustomerId, email, name } = req.body;
 
     if (!crmUserId || !email || !name) {
       res.status(400).json({ error: "crmUserId, email, and name are required" });
+      return;
+    }
+
+    // Validate input lengths to prevent abuse
+    if (String(crmUserId).length > 100 || String(email).length > 255 || String(name).length > 255) {
+      res.status(400).json({ error: "Input too long" });
       return;
     }
 
@@ -29,6 +35,11 @@ authSyncRouter.post("/sync", async (req, res) => {
       });
 
       if (localUser) {
+        // Prevent linking if this user is already linked to a DIFFERENT CRM account
+        if (localUser.crmUserId && localUser.crmUserId !== String(crmUserId)) {
+          res.status(409).json({ error: "Email already linked to another account" });
+          return;
+        }
         // Link existing local user to CRM
         localUser = await prisma.user.update({
           where: { id: localUser.id },
@@ -46,7 +57,7 @@ authSyncRouter.post("/sync", async (req, res) => {
             email,
             password: "", // No local password — CRM handles auth
             name,
-            role: role || "customer",
+            role: "customer", // Always customer — admin role set manually in DB only
             crmUserId: String(crmUserId),
             crmCustomerId: crmCustomerId ? String(crmCustomerId) : null,
             lastLoginAt: new Date(),

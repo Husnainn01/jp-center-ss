@@ -62,14 +62,19 @@ bidRequestsRouter.post("/", async (req, res) => {
 
     const results = [];
     for (const item of items) {
-      if (!item.auctionId) continue;
+      const auctionId = parseInt(String(item.auctionId));
+      if (!auctionId || isNaN(auctionId)) continue;
+      // Sanitize user inputs
+      const safeNote = item.note ? String(item.note).replace(/<[^>]*>/g, "").trim().slice(0, 500) : null;
+      const safeBid = item.maxBid ? parseFloat(String(item.maxBid)) : null;
+      if (safeBid !== null && (isNaN(safeBid) || safeBid < 0 || safeBid > 999999999)) continue;
       try {
         const bid = await prisma.bidRequest.create({
           data: {
             userId,
-            auctionId: item.auctionId,
-            maxBid: item.maxBid ? parseFloat(item.maxBid) : null,
-            note: item.note || null,
+            auctionId,
+            maxBid: safeBid,
+            note: safeNote,
           },
         });
         results.push({ auctionId: item.auctionId, status: "created", id: bid.id });
