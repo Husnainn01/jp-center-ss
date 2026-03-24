@@ -367,6 +367,7 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                 new_vehicles = []
                 skipped = 0
                 skipped_date = 0
+                no_date_count = 0
                 for rv in raw_vehicles:
                     item_id = f"iauc-{rv['vid']}"
                     if item_id in existing_ids:
@@ -380,7 +381,7 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
 
                     auction_date_str = vehicle.get("auction_date", "")
                     if not auction_date_str:
-                        print(f"  [iauc] DEBUG: vid={rv['vid']} has NO auction_date. longCode='{rv.get('longCode','')}' allCodes={rv.get('allCodes',[])} site='{rv.get('site','')}'")
+                        no_date_count += 1
 
                     auction_date = normalize_auction_date(auction_date_str, "iauc")
                     if auction_date and auction_date < target:
@@ -391,6 +392,8 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
 
                 total_on_page = len(raw_vehicles)
                 print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {total_on_page} on page ({len(new_vehicles)} new, {skipped} existing)")
+                if no_date_count:
+                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {no_date_count} vehicles have no list-page date (will get from detail page)")
                 if skipped_date:
                     print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: skipped {skipped_date} past dates")
 
