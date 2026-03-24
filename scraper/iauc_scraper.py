@@ -417,7 +417,7 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                     ]
 
                     async def fetch_images_and_maker(vid: str):
-                        """Open detail page: grab maker, holding date, 1 exhibit sheet + 2 car photos."""
+                        """Open detail page: grab maker, model, holding date, 1 exhibit sheet + 2 car photos."""
                         async with semaphore:
                             new_page = await context.new_page()
                             try:
@@ -425,16 +425,26 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                                 await new_page.goto(detail_url, wait_until="domcontentloaded", timeout=20000)
                                 await asyncio.sleep(2)
                                 if "detail" not in new_page.url:
-                                    return {"car_urls": [], "sheet_url": None, "maker": "", "holding_date": ""}
+                                    return {"car_urls": [], "sheet_url": None, "maker": "", "model": "", "holding_date": ""}
 
-                                # Extract maker + holding date from detail page text
+                                # Extract maker, model, holding date from detail page text
                                 detail_text = await new_page.inner_text("body")
                                 maker = ""
+                                detail_model = ""
                                 holding_date = ""
-                                for line in detail_text.split("\n"):
-                                    line = line.strip()
+                                lines = [l.strip() for l in detail_text.split("\n") if l.strip()]
+                                for idx, line in enumerate(lines):
                                     if line in known_makers:
                                         maker = line
+                                        # Model is on the next line after maker
+                                        if idx + 1 < len(lines):
+                                            raw_model = lines[idx + 1].strip()
+                                            # Strip chassis code (e.g., "Prius ZVW30-5355115" → "Prius")
+                                            detail_model = re.split(r'\s+[A-Z0-9]{3,}-', raw_model)[0].strip()
+                                            if not detail_model:
+                                                detail_model = raw_model
+                                            # Strip standalone chassis codes like "ZVW55" at end
+                                            detail_model = re.sub(r'\s+[A-Z]{1,4}\d{2,}$', '', detail_model).strip()
                                     # Tab-separated fields: "Holding Date\tMar 25.2026 10:00"
                                     if "\t" in line:
                                         parts = line.split("\t", 1)
@@ -463,9 +473,9 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                                     else:
                                         if len(car_urls) < 2:
                                             car_urls.append(img['src'])
-                                return {"car_urls": car_urls, "sheet_url": sheet_url, "maker": maker, "holding_date": holding_date}
+                                return {"car_urls": car_urls, "sheet_url": sheet_url, "maker": maker, "model": detail_model, "holding_date": holding_date}
                             except:
-                                return {"car_urls": [], "sheet_url": None, "maker": "", "holding_date": ""}
+                                return {"car_urls": [], "sheet_url": None, "maker": "", "model": "", "holding_date": ""}
                             finally:
                                 await new_page.close()
 
@@ -474,16 +484,19 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                         return_exceptions=True,
                     )
 
-                    # Collect makers + holding dates from detail pages, upload images in parallel
+                    # Collect makers, models, holding dates from detail pages, upload images in parallel
                     maker_by_idx = {}
+                    model_by_idx = {}
                     date_by_idx = {}
                     upload_tasks = []
                     upload_map = []
                     for i, img_data in enumerate(img_results):
                         if isinstance(img_data, Exception):
-                            img_data = {"car_urls": [], "sheet_url": None, "maker": "", "holding_date": ""}
+                            img_data = {"car_urls": [], "sheet_url": None, "maker": "", "model": "", "holding_date": ""}
                         if img_data.get("maker"):
                             maker_by_idx[i] = img_data["maker"]
+                        if img_data.get("model"):
+                            model_by_idx[i] = img_data["model"]
                         if img_data.get("holding_date"):
                             date_by_idx[i] = img_data["holding_date"]
                         for url in img_data.get("car_urls", []):
@@ -508,9 +521,12 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
 
                     vehicles_to_save = []
                     for i, (vehicle, vid) in enumerate(new_vehicles):
-                        # Set maker from detail page
+                        # Set maker from detail page (list page doesn't have it)
                         if maker_by_idx.get(i):
                             vehicle["maker"] = maker_by_idx[i]
+                        # Fill in model from detail page if list page had none or empty
+                        if not vehicle.get("model") and model_by_idx.get(i):
+                            vehicle["model"] = model_by_idx[i]
                         # Fill in auction_date from detail page if list page had none
                         if not vehicle.get("auction_date") and date_by_idx.get(i):
                             vehicle["auction_date"] = date_by_idx[i]
