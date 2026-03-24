@@ -22,7 +22,7 @@ interface FilterOptions {
   auctionDays?: DayOption[];
 }
 
-const sel = "h-8 rounded border border-zinc-700 bg-zinc-900 px-2.5 text-xs text-zinc-200 w-full focus:outline-none focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500/50 cursor-pointer appearance-none";
+const sel = "h-8 rounded border border-border bg-card px-2.5 text-xs text-zinc-200 w-full focus:outline-none focus:ring-1 focus:ring-blue-500/40 focus:border-blue-500/40 cursor-pointer appearance-none transition-colors hover:border-zinc-600";
 
 function formatDayLabel(dateStr: string): { label: string; day: string; weekday: string } {
   const d = new Date(dateStr + "T00:00:00");
@@ -256,7 +256,7 @@ function Content() {
         <div className="h-20 bg-zinc-800/50 animate-pulse rounded" />
         <div className="space-y-px">
           {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className="h-10 bg-zinc-900 animate-pulse" />
+            <div key={i} className="h-10 bg-card animate-pulse" />
           ))}
         </div>
       </div>
@@ -274,7 +274,7 @@ function Content() {
           </span>
         </div>
         <div className="flex items-center gap-1">
-          <div className="flex border border-zinc-700 rounded overflow-hidden h-7">
+          <div className="flex border border-border rounded overflow-hidden h-7">
             <button onClick={() => setViewMode("grid")} className={`px-2 transition-colors ${viewMode === "grid" ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"}`}>
               <LayoutGrid className="h-3.5 w-3.5" />
             </button>
@@ -293,7 +293,7 @@ function Content() {
             className={`flex-shrink-0 px-3 py-1.5 rounded border text-xs font-medium transition-all ${
               !get("auctionDay")
                 ? "bg-blue-500 text-white border-blue-500"
-                : "bg-zinc-900 text-zinc-400 border-zinc-700 hover:text-zinc-200 hover:border-zinc-600"
+                : "bg-card text-zinc-400 border-border hover:text-zinc-200 hover:border-zinc-600"
             }`}
           >
             All
@@ -308,7 +308,7 @@ function Content() {
                 className={`flex-shrink-0 min-w-[60px] px-2.5 py-1.5 rounded border text-center transition-all ${
                   isSelected
                     ? "bg-blue-500 text-white border-blue-500"
-                    : "bg-zinc-900 text-zinc-400 border-zinc-700 hover:text-zinc-200 hover:border-zinc-600"
+                    : "bg-card text-zinc-400 border-border hover:text-zinc-200 hover:border-zinc-600"
                 }`}
               >
                 <div className="text-[9px] font-medium opacity-70">{label}</div>
@@ -321,7 +321,7 @@ function Content() {
       )}
 
       {/* Filters */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded p-3 space-y-2.5">
+      <div className="bg-card border border-border rounded p-3 space-y-2.5">
         {/* Row 1: Make, Model, Chassis Code, Year range */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <select value={get("maker")} onChange={e => update({ maker: e.target.value })} className={sel}>
@@ -404,7 +404,7 @@ function Content() {
         {activeFilters > 0 && (
           <div className="flex items-center justify-between pt-1">
             <span className="text-[11px] text-zinc-500">{activeFilters} filter{activeFilters > 1 ? "s" : ""}</span>
-            <button onClick={clearAll} className="h-7 px-2.5 rounded border border-zinc-700 text-zinc-400 text-[11px] font-medium hover:text-zinc-200 hover:border-zinc-600 transition-colors flex items-center gap-1.5">
+            <button onClick={clearAll} className="h-7 px-2.5 rounded border border-border text-zinc-400 text-[11px] font-medium hover:text-zinc-200 hover:border-zinc-600 transition-colors flex items-center gap-1.5">
               <X className="h-3 w-3" /> Clear
             </button>
           </div>
@@ -434,7 +434,7 @@ function Content() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             {auctions.map(a => (
               <Link key={a.id} href={`/dashboard/${a.id}`} className="group">
-                <div className="bg-zinc-900 border border-zinc-800 rounded overflow-hidden hover:border-zinc-600 transition-all duration-100">
+                <div className="bg-card border border-border rounded overflow-hidden hover:border-zinc-600 transition-all duration-100">
                   <div className="aspect-[16/10] bg-zinc-800 relative overflow-hidden">
                     {a.imageUrl ? (
                       <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="(max-width: 640px) 50vw, 25vw" loading="lazy" unoptimized />
@@ -467,10 +467,10 @@ function Content() {
           </div>
         ) : (
           /* List — dark dense table */
-          <div className="bg-zinc-900 border border-zinc-800 rounded overflow-hidden">
+          <div className="bg-card border border-border rounded overflow-hidden">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-zinc-800 bg-zinc-900">
+                <tr className="border-b border-border bg-card">
                   <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-3 py-2 w-[50px]"></th>
                   <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-2 py-2">Vehicle</th>
                   <th className="text-left font-medium text-zinc-500 uppercase text-[10px] tracking-wider px-2 py-2 hidden md:table-cell">Auction</th>
@@ -482,7 +482,7 @@ function Content() {
               </thead>
               <tbody>
                 {auctions.map(a => (
-                  <tr key={a.id} className="border-b border-zinc-800/50 last:border-0 hover:bg-zinc-800/40 transition-colors cursor-pointer group relative">
+                  <tr key={a.id} className="border-b border-border/50 last:border-0 hover:bg-zinc-800/40 transition-colors cursor-pointer group relative">
                     <td className="px-3 py-1.5">
                       <Link href={`/dashboard/${a.id}`} className="absolute inset-0 z-[1]" aria-label={`${a.maker || ""} ${a.model || "Vehicle"}`} />
                       <div className="w-[44px] h-[32px] rounded-sm overflow-hidden bg-zinc-800 relative">
@@ -566,7 +566,7 @@ export function CustomerAuctions() {
         <div className="h-16 bg-zinc-800/50 animate-pulse rounded" />
         <div className="space-y-px">
           {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className="h-10 bg-zinc-900 animate-pulse" />
+            <div key={i} className="h-10 bg-card animate-pulse" />
           ))}
         </div>
       </div>

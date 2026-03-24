@@ -17,7 +17,7 @@ export function MobileBottomBar({ auctionId }: Props) {
   if (index === -1) return null;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 md:hidden">
+    <div className="fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur-md border-t border-border md:hidden">
       <div className="flex items-center justify-between h-14 px-3">
         {/* Prev */}
         {prevId ? (

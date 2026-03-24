@@ -4,8 +4,9 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, ArrowLeft } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { useNavigationContext } from "../../components/NavigationContext";
+import { cn } from "@/lib/utils";
 
 interface Props {
   auctionId: number;
@@ -67,11 +68,9 @@ export function VehicleNavigation({ auctionId }: Props) {
 
           <div className="flex items-center gap-1">
             {prevId ? (
-              <Button variant="outline" size="sm" className="h-8 w-8 p-0" asChild>
-                <Link href={`/dashboard/${prevId}`} aria-label="Previous vehicle">
-                  <ChevronLeft className="h-4 w-4" />
-                </Link>
-              </Button>
+              <Link href={`/dashboard/${prevId}`} aria-label="Previous vehicle" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 w-8 p-0")}>
+                <ChevronLeft className="h-4 w-4" />
+              </Link>
             ) : (
               <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled>
                 <ChevronLeft className="h-4 w-4" />
@@ -83,11 +82,9 @@ export function VehicleNavigation({ auctionId }: Props) {
             </span>
 
             {nextId ? (
-              <Button variant="outline" size="sm" className="h-8 w-8 p-0" asChild>
-                <Link href={`/dashboard/${nextId}`} aria-label="Next vehicle">
-                  <ChevronRight className="h-4 w-4" />
-                </Link>
-              </Button>
+              <Link href={`/dashboard/${nextId}`} aria-label="Next vehicle" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 w-8 p-0")}>
+                <ChevronRight className="h-4 w-4" />
+              </Link>
             ) : (
               <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled>
                 <ChevronRight className="h-4 w-4" />

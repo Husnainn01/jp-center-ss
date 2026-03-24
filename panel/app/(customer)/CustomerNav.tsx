@@ -63,7 +63,7 @@ function SidebarBrand() {
 
 export function CustomerSidebar() {
   return (
-    <aside className="w-[180px] flex-shrink-0 border-r border-zinc-800 bg-zinc-950 flex-col hidden md:flex">
+    <aside className="w-[180px] flex-shrink-0 border-r border-border bg-background flex-col hidden md:flex">
       <SidebarBrand />
       <div className="h-px bg-zinc-800 mx-3" />
       <ScrollArea className="flex-1">
@@ -85,7 +85,7 @@ export function MobileNav() {
       <SheetTrigger className="md:hidden p-1.5 -ml-1 rounded hover:bg-zinc-800 transition-colors">
         <Menu className="h-5 w-5 text-zinc-400" />
       </SheetTrigger>
-      <SheetContent side="left" className="w-[220px] p-0 bg-zinc-950 border-zinc-800">
+      <SheetContent side="left" className="w-[220px] p-0 bg-background border-border">
         <SidebarBrand />
         <div className="h-px bg-zinc-800 mx-3" />
         <ScrollArea className="flex-1">

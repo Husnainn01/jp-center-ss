@@ -25,11 +25,11 @@ export default async function CustomerLayout({
   const initials = userName.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-zinc-950">
+    <div className="flex h-screen overflow-hidden bg-background">
       <CustomerSidebar />
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-11 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md flex items-center justify-between px-4 md:px-5 flex-shrink-0">
+        <header className="h-11 border-b border-border bg-background/80 backdrop-blur-md flex items-center justify-between px-4 md:px-5 flex-shrink-0">
           <div className="flex items-center gap-2">
             <MobileNav />
             <span className="text-xs text-zinc-500 hidden sm:inline">
@@ -53,7 +53,7 @@ export default async function CustomerLayout({
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto bg-zinc-950">
+        <main className="flex-1 overflow-y-auto bg-background">
           <div className="p-3 md:p-4 max-w-[1600px]"><NavigationProvider>{children}</NavigationProvider></div>
         </main>
       </div>

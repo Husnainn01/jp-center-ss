@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { formatPrice } from "@/lib/format";
 import { useNavigationContext } from "../../components/NavigationContext";
 import { AddToListButton } from "../../components/AddToListButton";
@@ -42,7 +43,7 @@ export function StickyHeader({ auctionId, title, price }: Props) {
 
       {/* Sticky header bar */}
       <div
-        className={`fixed top-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800 transition-all duration-200 hidden md:block ${
+        className={`fixed top-0 left-0 right-0 z-40 bg-background/95 backdrop-blur-md border-b border-border transition-all duration-200 hidden md:block ${
           visible ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0 pointer-events-none"
         }`}
       >
@@ -70,16 +71,16 @@ export function StickyHeader({ auctionId, title, price }: Props) {
             {index !== -1 && (
               <div className="flex items-center gap-1 ml-2">
                 {prevId ? (
-                  <Button variant="outline" size="sm" className="h-8 w-8 p-0" asChild>
-                    <Link href={`/dashboard/${prevId}`}><ChevronLeft className="h-4 w-4" /></Link>
-                  </Button>
+                  <Link href={`/dashboard/${prevId}`} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 w-8 p-0")}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Link>
                 ) : (
                   <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled><ChevronLeft className="h-4 w-4" /></Button>
                 )}
                 {nextId ? (
-                  <Button variant="outline" size="sm" className="h-8 w-8 p-0" asChild>
-                    <Link href={`/dashboard/${nextId}`}><ChevronRight className="h-4 w-4" /></Link>
-                  </Button>
+                  <Link href={`/dashboard/${nextId}`} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 w-8 p-0")}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Link>
                 ) : (
                   <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled><ChevronRight className="h-4 w-4" /></Button>
                 )}
