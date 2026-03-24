@@ -172,8 +172,14 @@ function Content() {
   }, [sp]);
 
   function handleSmartSearch(filters: Record<string, string>) {
+    const hasFilters = Object.values(filters).some(v => v);
+    if (!hasFilters) {
+      // Full clear — remove everything including localStorage
+      try { localStorage.removeItem("auction-filters"); } catch {}
+      router.replace("/dashboard");
+      return;
+    }
     // Build fresh params — only include non-empty filter values
-    // This ensures old params are cleared when the user removes a filter
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([k, v]) => {
       if (v) params.set(k, v);
@@ -261,6 +267,14 @@ function Content() {
         sort={get("sort") || "firstSeen"}
         onSortChange={(s) => update({ sort: s })}
         total={total}
+        activeFilters={{
+          maker: get("maker"),
+          search: get("search"),
+          chassisCode: get("chassisCode"),
+          auctionHouse: get("auctionHouse"),
+          yearFrom: get("yearFrom"),
+          yearTo: get("yearTo"),
+        }}
       />
 
       {/* Table/Grid with loading overlay */}

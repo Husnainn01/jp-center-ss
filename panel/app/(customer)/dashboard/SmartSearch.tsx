@@ -161,6 +161,7 @@ interface Props {
   sort: string;
   onSortChange: (sort: string) => void;
   total: number;
+  activeFilters: Record<string, string>; // current filters from URL params
 }
 
 function formatDayLabel(dateStr: string): { label: string; day: string } {
@@ -176,12 +177,51 @@ function formatDayLabel(dateStr: string): { label: string; day: string } {
   return { label: d.toLocaleDateString("en", { weekday: "short" }), day };
 }
 
-export function SmartSearch({ onFiltersChange, auctionDays, selectedDay, onDaySelect, sort, onSortChange, total }: Props) {
+// Build tags from active URL filter params (for display when page loads with saved filters)
+function tagsFromParams(params: Record<string, string>): ParsedTag[] {
+  const tags: ParsedTag[] = [];
+  if (params.chassisCode) tags.push({ type: "chassis", label: params.chassisCode, value: params.chassisCode, key: "chassisCode" });
+  if (params.maker) tags.push({ type: "maker", label: params.maker, value: params.maker, key: "maker" });
+  if (params.yearFrom && params.yearTo && params.yearFrom !== params.yearTo) {
+    tags.push({ type: "year", label: `${params.yearFrom}–${params.yearTo}`, value: `${params.yearFrom}-${params.yearTo}`, key: "year" });
+  } else if (params.yearFrom) {
+    tags.push({ type: "year", label: params.yearFrom, value: params.yearFrom, key: "year" });
+  }
+  if (params.auctionHouse) tags.push({ type: "auction", label: params.auctionHouse, value: params.auctionHouse, key: "auctionHouse" });
+  if (params.search) tags.push({ type: "search", label: params.search, value: params.search, key: "search" });
+  return tags;
+}
+
+export function SmartSearch({ onFiltersChange, auctionDays, selectedDay, onDaySelect, sort, onSortChange, total, activeFilters }: Props) {
   const [inputValue, setInputValue] = useState("");
   const [tags, setTags] = useState<ParsedTag[]>([]);
   const [hintIdx, setHintIdx] = useState(0);
+  const [initialized, setInitialized] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Initialize tags from URL params (restored from localStorage or direct URL)
+  useEffect(() => {
+    if (initialized) return;
+    const hasActiveFilters = Object.values(activeFilters).some(v => v);
+    if (hasActiveFilters) {
+      const restoredTags = tagsFromParams(activeFilters);
+      setTags(restoredTags);
+      // Reconstruct input text from active filters
+      const parts: string[] = [];
+      if (activeFilters.maker) parts.push(activeFilters.maker);
+      if (activeFilters.search) parts.push(activeFilters.search);
+      if (activeFilters.chassisCode) parts.push(activeFilters.chassisCode);
+      if (activeFilters.auctionHouse) parts.push(activeFilters.auctionHouse);
+      if (activeFilters.yearFrom && activeFilters.yearTo && activeFilters.yearFrom !== activeFilters.yearTo) {
+        parts.push(`${activeFilters.yearFrom}-${activeFilters.yearTo}`);
+      } else if (activeFilters.yearFrom) {
+        parts.push(activeFilters.yearFrom);
+      }
+      setInputValue(parts.join(" "));
+    }
+    setInitialized(true);
+  }, [activeFilters, initialized]);
 
   // Rotate placeholder hints
   useEffect(() => {

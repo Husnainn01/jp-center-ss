@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, ArrowLeft } from "lucide-react";
@@ -16,9 +16,46 @@ export function VehicleNavigation({ auctionId }: Props) {
   const router = useRouter();
   const navCtx = useNavigationContext();
 
-  const { prevId, nextId, index } = navCtx?.getAdjacentIds(auctionId) ?? { prevId: null, nextId: null, index: -1 };
+  // Read navigation state — also try sessionStorage directly as fallback
+  // (context ref may be stale if the listing page updated it after this page mounted)
+  const getNavState = useCallback(() => {
+    const fromCtx = navCtx?.getAdjacentIds(auctionId);
+    if (fromCtx && fromCtx.index !== -1) return fromCtx;
+    // Fallback: read directly from sessionStorage
+    try {
+      const raw = sessionStorage.getItem("auction-nav-context");
+      if (raw) {
+        const data = JSON.parse(raw);
+        const ids: number[] = data.ids || [];
+        const idx = ids.indexOf(auctionId);
+        if (idx !== -1) {
+          return {
+            prevId: idx > 0 ? ids[idx - 1] : null,
+            nextId: idx < ids.length - 1 ? ids[idx + 1] : null,
+            index: idx,
+          };
+        }
+      }
+    } catch {}
+    return { prevId: null, nextId: null, index: -1 };
+  }, [auctionId, navCtx]);
+
+  const [navState, setNavState] = useState(() => getNavState());
+
+  // Re-read on mount and when auctionId changes (client-side navigation)
+  useEffect(() => {
+    setNavState(getNavState());
+  }, [auctionId, getNavState]);
+
+  const { prevId, nextId, index } = navState;
   const backUrl = navCtx?.getBackUrl() ?? "/dashboard";
-  const totalCount = navCtx?.totalCount ?? 0;
+  const totalCount = navCtx?.totalCount ?? (() => {
+    try {
+      const raw = sessionStorage.getItem("auction-nav-context");
+      if (raw) return JSON.parse(raw).total || 0;
+    } catch {}
+    return 0;
+  })();
   const hasContext = index !== -1;
 
   // Prefetch adjacent vehicle pages for instant navigation

@@ -21,8 +21,28 @@ export function StickyHeader({ auctionId, title, price }: Props) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const navCtx = useNavigationContext();
 
-  const { prevId, nextId, index } = navCtx?.getAdjacentIds(auctionId) ?? { prevId: null, nextId: null, index: -1 };
-  const totalCount = navCtx?.totalCount ?? 0;
+  // Read nav state with sessionStorage fallback (same as VehicleNavigation)
+  let prevId: number | null = null, nextId: number | null = null, index = -1, totalCount = 0;
+  const fromCtx = navCtx?.getAdjacentIds(auctionId);
+  if (fromCtx && fromCtx.index !== -1) {
+    ({ prevId, nextId, index } = fromCtx);
+    totalCount = navCtx?.totalCount ?? 0;
+  } else {
+    try {
+      const raw = sessionStorage.getItem("auction-nav-context");
+      if (raw) {
+        const data = JSON.parse(raw);
+        const ids: number[] = data.ids || [];
+        const idx = ids.indexOf(auctionId);
+        if (idx !== -1) {
+          prevId = idx > 0 ? ids[idx - 1] : null;
+          nextId = idx < ids.length - 1 ? ids[idx + 1] : null;
+          index = idx;
+          totalCount = data.total || 0;
+        }
+      }
+    } catch {}
+  }
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
