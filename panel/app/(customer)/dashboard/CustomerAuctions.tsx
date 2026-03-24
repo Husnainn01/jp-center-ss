@@ -20,13 +20,17 @@ interface FilterOptions {
 }
 
 
-const PASSTHROUGH_KEYS = ["maker", "model", "chassisCode", "location", "auctionHouse", "source", "search", "sort", "order", "minPrice", "maxPrice", "rating", "yearFrom", "yearTo", "auctionDay"];
+const PASSTHROUGH_KEYS = ["maker", "model", "chassisCode", "location", "auctionHouse", "source", "search", "sort", "order", "minPrice", "maxPrice", "rating", "yearFrom", "yearTo", "auctionDay", "pageSize"];
+
+const PAGE_SIZE_OPTIONS = [20, 40, 80, 100];
+const DEFAULT_PAGE_SIZE = 40;
 
 function buildQueryString(sp: URLSearchParams, includeMeta: boolean): string {
   const params = new URLSearchParams();
   const page = Math.max(1, parseInt(sp.get("page") || "1"));
+  const pageSize = parseInt(sp.get("pageSize") || String(DEFAULT_PAGE_SIZE));
   params.set("page", String(page));
-  params.set("pageSize", "40");
+  params.set("pageSize", String(pageSize));
   if (includeMeta) params.set("includeMeta", "true");
   if (!sp.get("status")) params.set("status", "upcoming");
 
@@ -174,13 +178,15 @@ function Content() {
     Object.entries(filters).forEach(([k, v]) => {
       if (v) params.set(k, v);
     });
-    // Preserve sort, order, auctionDay from current URL
+    // Preserve sort, order, auctionDay, pageSize from current URL
     const currentSort = sp.get("sort");
     const currentOrder = sp.get("order");
     const currentDay = sp.get("auctionDay");
+    const currentPageSize = sp.get("pageSize");
     if (currentSort) params.set("sort", currentSort);
     if (currentOrder) params.set("order", currentOrder);
     if (currentDay) params.set("auctionDay", currentDay);
+    if (currentPageSize) params.set("pageSize", currentPageSize);
     router.replace(`/dashboard?${params.toString()}`);
   }
 
@@ -366,30 +372,51 @@ function Content() {
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-muted-foreground/70 font-mono">
-            {(page - 1) * 40 + 1}–{Math.min(page * 40, total)} of {total.toLocaleString()}
-          </span>
-          <div className="flex items-center gap-0.5">
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground/90 hover:bg-muted" disabled={page <= 1} onClick={() => goPage(page - 1)}>
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </Button>
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              const p = page <= 3 ? i + 1 : page + i - 2;
-              if (p < 1 || p > totalPages) return null;
-              return (
-                <Button key={p} variant={p === page ? "default" : "ghost"} size="sm" className={`h-7 w-7 p-0 text-[11px] font-mono ${p === page ? "bg-blue-500 text-white hover:bg-blue-600" : "text-muted-foreground hover:text-foreground/90 hover:bg-muted"}`} onClick={() => goPage(p)}>
-                  {p}
+      {total > 0 && (() => {
+        const ps = parseInt(get("pageSize") || String(DEFAULT_PAGE_SIZE));
+        return (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-muted-foreground/70 font-mono">
+                {(page - 1) * ps + 1}–{Math.min(page * ps, total)} of {total.toLocaleString()}
+              </span>
+              <select
+                value={ps}
+                onChange={e => {
+                  const params = new URLSearchParams(sp.toString());
+                  params.set("pageSize", e.target.value);
+                  params.delete("page");
+                  router.replace(`/dashboard?${params.toString()}`);
+                }}
+                className="h-6 rounded border border-border bg-card px-1.5 text-[10px] text-muted-foreground focus:outline-none cursor-pointer appearance-none"
+              >
+                {PAGE_SIZE_OPTIONS.map(s => (
+                  <option key={s} value={s}>{s}/page</option>
+                ))}
+              </select>
+            </div>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-0.5">
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground/90 hover:bg-muted" disabled={page <= 1} onClick={() => goPage(page - 1)}>
+                  <ChevronLeft className="h-3.5 w-3.5" />
                 </Button>
-              );
-            })}
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground/90 hover:bg-muted" disabled={page >= totalPages} onClick={() => goPage(page + 1)}>
-              <ChevronRight className="h-3.5 w-3.5" />
-            </Button>
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  const p = page <= 3 ? i + 1 : page + i - 2;
+                  if (p < 1 || p > totalPages) return null;
+                  return (
+                    <Button key={p} variant={p === page ? "default" : "ghost"} size="sm" className={`h-7 w-7 p-0 text-[11px] font-mono ${p === page ? "bg-blue-500 text-white hover:bg-blue-600" : "text-muted-foreground hover:text-foreground/90 hover:bg-muted"}`} onClick={() => goPage(p)}>
+                      {p}
+                    </Button>
+                  );
+                })}
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground/90 hover:bg-muted" disabled={page >= totalPages} onClick={() => goPage(page + 1)}>
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
