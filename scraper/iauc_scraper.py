@@ -24,12 +24,12 @@ JAPANESE_MAKERS = {
     "ISUZU", "HINO",
 }
 
-# ── Limits (overnight vs daytime delta) ─────────────────────────────────────
-BATCH_SIZE           = 50    if OVERNIGHT_MODE else 50    # models per batch
-MAX_VEHICLES_TOTAL   = 99999 if OVERNIGHT_MODE else 99999 # no cap — skip logic handles dedup
-MAX_TIME_TOTAL       = 28800 if OVERNIGHT_MODE else 10800 # 8 hrs overnight, 3 hrs daytime safety
-MAX_RESULTS_PER_BATCH = 99999 if OVERNIGHT_MODE else 99999 # no cap — time limit is the safety valve
-CONCURRENT_TABS      = 15   if OVERNIGHT_MODE else 10     # parallel extractions
+# ── Limits (same for day and night — skip logic makes daytime fast) ────────
+BATCH_SIZE           = 50     # models per batch
+MAX_VEHICLES_TOTAL   = 99999  # no cap — skip logic handles dedup
+MAX_TIME_TOTAL       = 28800  # 8 hrs safety valve (daytime exits early via skip logic)
+MAX_RESULTS_PER_BATCH = 99999 # no cap — time limit is the safety valve
+CONCURRENT_TABS      = 15    # parallel detail page extractions
 
 
 async def _select_makers(page: Page, maker_names: set[str] | None = None):
@@ -147,16 +147,9 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     search_base_url = page.url.split("#")[0]
     print(f"  [iauc] Search URL saved: {search_base_url[:60]}...")
 
-    # === Step 3+4+5: Two-pass maker strategy ===
-    # Overnight: one pass with all makers
-    # Daytime: Pass 1 = Japanese makers only, Pass 2 = all makers (existing_ids skips dupes)
-    if OVERNIGHT_MODE:
-        maker_passes = [(None, "All makers")]
-    else:
-        maker_passes = [
-            (JAPANESE_MAKERS, "Japanese makers"),
-            (None, "All makers (foreign + remaining)"),
-        ]
+    # === Step 3+4+5: Single pass with all makers ===
+    # No need for 2-pass strategy — largest models first + skip logic makes this fast
+    maker_passes = [(None, "All makers")]
 
     all_ids = []
 
