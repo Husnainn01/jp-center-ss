@@ -15,11 +15,12 @@ const KNOWN_MAKERS = new Set([
 ]);
 
 // Auction house prefixes — match "USS" in "USS NAGOYA"
+// Backend uses ILIKE so partial matches work (e.g. "USS" matches "USS Tokyo", "USS Nagoya")
 // Note: "NISSAN" excluded because it conflicts with the car maker.
-// Auction house "NISSAN Osaka" will be matched via "search" instead.
 const AUCTION_PREFIXES = [
-  "USS", "TAA", "IAA", "HAA", "JU", "KCAA", "ARAI", "Honda AA", "NAA",
-  "ZIP", "AUCNET", "Aux", "SUZUKI AA", "LUM",
+  "Honda AA", "SUZUKI AA",  // two-word prefixes first (greedy match)
+  "USS", "TAA", "IAA", "HAA", "JU", "KCAA", "ARAI", "NAA", "LAA", "CAA",
+  "ZIP", "AUCNET", "BAYAUC", "MIRIVE", "HERO", "LUM", "Aux",
 ];
 
 // ── Parser ──────────────────────────────────────────────────────────────────
@@ -56,34 +57,28 @@ export function parseSearchInput(text: string): { filters: ParsedFilters; tags: 
     remaining = remaining.replace(yearRangeMatch[0], " ").trim();
   }
 
-  // 2. Auction house: match known prefixes (must check before maker since "NISSAN" could be both)
+  // 2. Auction house: match known prefixes
+  // Backend uses ILIKE so "USS Nagoya" matches even if user types "USS NAGOYA"
   const upperRemaining = remaining.toUpperCase();
   for (const prefix of AUCTION_PREFIXES) {
     const prefixUpper = prefix.toUpperCase();
     const idx = upperRemaining.indexOf(prefixUpper);
     if (idx !== -1) {
-      // Extract the full auction house name (prefix + next word if exists)
+      // Extract prefix + next word as the auction house name
       const afterPrefix = remaining.substring(idx + prefix.length).trim();
-      const nextWord = afterPrefix.match(/^(\S+)/);
-      let auctionName: string;
+      const nextWord = afterPrefix.match(/^([A-Za-z]\S*)/); // next word starting with letter
+      let auctionName = prefix;
+      let matchLen = prefix.length;
 
-      // Check if next word looks like a location name (not a number, not a chassis code)
-      const nextWordStr = nextWord ? nextWord[1] : "";
-      if (nextWordStr && nextWordStr.length > 1 && !nextWordStr.match(/^\d/) && /^[A-Za-z]/.test(nextWordStr)) {
-        auctionName = prefix + " " + nextWordStr;
-        remaining = remaining.substring(0, idx) + remaining.substring(idx + prefix.length + 1 + nextWordStr.length);
-      } else if (prefix === "AUCNET" || prefix === "Aux") {
-        // Single-word auction houses
-        auctionName = prefix === "Aux" ? "Aux Mobility" : "AUCNET";
-        remaining = remaining.substring(0, idx) + remaining.substring(idx + prefix.length);
-      } else {
-        auctionName = prefix;
-        remaining = remaining.substring(0, idx) + remaining.substring(idx + prefix.length);
+      if (nextWord && nextWord[1].length > 1) {
+        auctionName = prefix + " " + nextWord[1];
+        matchLen = prefix.length + 1 + nextWord[1].length;
       }
 
       filters.auctionHouse = auctionName.trim();
       tags.push({ type: "auction", label: auctionName.trim(), value: auctionName.trim(), key: "auctionHouse" });
-      break; // only one auction house at a time
+      remaining = (remaining.substring(0, idx) + remaining.substring(idx + matchLen)).trim();
+      break;
     }
   }
   remaining = remaining.trim();

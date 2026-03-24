@@ -36,7 +36,7 @@ auctionsRouter.get("/", async (req, res) => {
     if (model) where.model = model;
     if (location) where.location = location;
     if (chassisCode) where.chassisCode = { contains: chassisCode, mode: "insensitive" };
-    if (auctionHouse) where.auctionHouse = auctionHouse;
+    if (auctionHouse) where.auctionHouse = { contains: auctionHouse, mode: "insensitive" };
     if (source) where.source = source;
     if (status) where.status = status;
     else if (!req.query.status) where.status = undefined; // Allow all statuses by default
@@ -101,7 +101,7 @@ auctionsRouter.get("/", async (req, res) => {
           ${model ? Prisma.sql`AND model = ${model}` : Prisma.empty}
           ${location ? Prisma.sql`AND location = ${location}` : Prisma.empty}
           ${chassisCode ? Prisma.sql`AND chassis_code ILIKE ${'%' + chassisCode + '%'}` : Prisma.empty}
-          ${auctionHouse ? Prisma.sql`AND auction_house = ${auctionHouse}` : Prisma.empty}
+          ${auctionHouse ? Prisma.sql`AND auction_house ILIKE ${'%' + auctionHouse + '%'}` : Prisma.empty}
           ${source ? Prisma.sql`AND source = ${source}` : Prisma.empty}
           ${minPrice ? Prisma.sql`AND start_price >= ${parseFloat(minPrice)}` : Prisma.empty}
           ${maxPrice ? Prisma.sql`AND start_price <= ${parseFloat(maxPrice)}` : Prisma.empty}
