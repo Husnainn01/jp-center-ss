@@ -264,6 +264,8 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
             # Paginate through results — extract data from list, images from detail in parallel
             batch_ids = []
             page_num = 0
+            consecutive_all_existing = 0  # track pages with 0 new vehicles
+            MAX_CONSECUTIVE_EXISTING = 5  # skip rest of batch after 5 pages with nothing new
             while True:
                 page_num += 1
 
@@ -274,6 +276,9 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                     break
                 if len(batch_ids) >= MAX_RESULTS_PER_BATCH:
                     print(f"  [iauc] P{pass_idx + 1} Batch {batch_num}: result limit reached ({len(batch_ids)})")
+                    break
+                if consecutive_all_existing >= MAX_CONSECUTIVE_EXISTING:
+                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num}: {MAX_CONSECUTIVE_EXISTING} consecutive pages with 0 new — skipping rest")
                     break
 
                 # ── Extract ALL vehicle data from the list page in one JS call ──
@@ -366,6 +371,12 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                 print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {total_on_page} on page ({len(new_vehicles)} new, {skipped} existing)")
                 if skipped_date:
                     print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: skipped {skipped_date} past dates")
+
+                # Track consecutive all-existing pages for early exit
+                if len(new_vehicles) == 0 and total_on_page > 0:
+                    consecutive_all_existing += 1
+                else:
+                    consecutive_all_existing = 0
 
                 # ── Parallel: open detail pages for 1 exhibit sheet + 2 car photos ──
                 if new_vehicles:
