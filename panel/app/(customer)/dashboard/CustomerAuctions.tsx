@@ -9,7 +9,7 @@ import { formatPrice } from "@/lib/format";
 import { proxyUrl } from "@/lib/image";
 import { Button } from "@/components/ui/button";
 import {
-  ChevronLeft, ChevronRight, Car, LayoutGrid, AlignJustify, Loader2,
+  ChevronLeft, ChevronRight, Car, LayoutGrid, AlignJustify, Loader2, RefreshCw,
 } from "lucide-react";
 import { useNavigationContext } from "../components/NavigationContext";
 import { SmartSearch } from "./SmartSearch";
@@ -65,6 +65,7 @@ function Content() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const get = useCallback((k: string) => sp.get(k) ?? "", [sp]);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   // Fetch auctions from API (client-side)
   const fetchAuctions = useCallback((searchParams: URLSearchParams) => {
@@ -110,6 +111,7 @@ function Content() {
 
         setLoading(false);
         setInitialLoad(false);
+        setLastUpdated(new Date());
       })
       .catch(err => {
         if (err.name !== "AbortError") {
@@ -137,6 +139,21 @@ function Content() {
       if (abortRef.current) abortRef.current.abort();
     };
   }, []);
+
+  // Auto-refresh every 2 minutes to pick up new data
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchAuctions(sp);
+      setLastUpdated(new Date());
+    }, 2 * 60 * 1000); // 2 minutes
+    return () => clearInterval(interval);
+  }, [sp, fetchAuctions]);
+
+  // Manual refresh
+  function handleRefresh() {
+    fetchAuctions(sp);
+    setLastUpdated(new Date());
+  }
 
   // Restore saved filters on first load if no URL params
   useEffect(() => {
@@ -253,8 +270,23 @@ function Content() {
     <div className="space-y-4">
       {/* Header + Smart Search */}
       <div className="flex items-center justify-between mb-3">
-        <h1 className="text-base font-bold tracking-tight text-foreground">Vehicles</h1>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-3">
+          <h1 className="text-base font-bold tracking-tight text-foreground">Vehicles</h1>
+          {lastUpdated && (
+            <span className="text-[10px] text-muted-foreground/50 font-mono hidden sm:inline">
+              updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className="h-7 w-7 rounded border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            title="Refresh data"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          </button>
           <div className="flex border border-border rounded overflow-hidden h-7">
             <button onClick={() => setViewMode("grid")} className={`px-2 transition-colors ${viewMode === "grid" ? "bg-accent text-foreground" : "text-muted-foreground/70 hover:text-foreground/80 hover:bg-muted"}`}>
               <LayoutGrid className="h-3.5 w-3.5" />
