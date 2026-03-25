@@ -539,6 +539,7 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                             sheet_by_idx[idx] = val
 
                     vehicles_to_save = []
+                    skipped_old = 0
                     for i, (vehicle, vid) in enumerate(new_vehicles):
                         # Set maker from detail page (list page doesn't have it)
                         if maker_by_idx.get(i):
@@ -549,11 +550,22 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                         # Fill in auction_date from detail page if list page had none
                         if not vehicle.get("auction_date") and date_by_idx.get(i):
                             vehicle["auction_date"] = date_by_idx[i]
+
+                        # FINAL date check — skip if auction date is before target (today or past)
+                        # This catches vehicles that got their date from the detail page
+                        final_date = normalize_auction_date(vehicle.get("auction_date", ""), "iauc")
+                        if final_date and final_date < target:
+                            skipped_old += 1
+                            continue
+
                         car_imgs = car_by_idx.get(i, [])
                         vehicle["images"] = car_imgs
                         vehicle["image_url"] = car_imgs[0] if car_imgs else None
                         vehicle["exhibit_sheet"] = sheet_by_idx.get(i)
                         vehicles_to_save.append(vehicle)
+
+                    if skipped_old:
+                        print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: skipped {skipped_old} vehicles with past dates (from detail page)")
 
                     if vehicles_to_save:
                         result = upsert_auctions(vehicles_to_save)

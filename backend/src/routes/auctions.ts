@@ -57,8 +57,7 @@ auctionsRouter.get("/", async (req, res) => {
     if (auctionDay) {
       where.auctionDateNorm = new Date(auctionDay);
     } else if (status === "upcoming") {
-      // For upcoming auctions, only show FUTURE dates (tomorrow onwards)
-      // Today's auctions are useless — they've already started
+      // Only show FUTURE dates (tomorrow onwards)
       const tomorrow = new Date(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" }));
       tomorrow.setDate(tomorrow.getDate() + 1);
       where.auctionDateNorm = { gte: tomorrow };
