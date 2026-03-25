@@ -94,57 +94,57 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     existing_ids = get_existing_item_ids("iauc")
     print(f"  [iauc] {len(existing_ids)} existing vehicles in DB (will skip)")
 
-    # === Step 1: Select upcoming auctions (FUTURE ONLY — no today) ===
+    # === Step 1: Select AUCTION sites only (NOT Kyoyuzaiko), skip Today ===
     jst_now = now_jst()
     target = get_target_date()  # tomorrow
     print(f"  [iauc] JST time: {jst_now.strftime('%Y-%m-%d %H:%M')}")
-    print(f"  [iauc] Target: {target} onwards (tomorrow + future ONLY, skipping today)")
+    print(f"  [iauc] Target: {target} onwards (FUTURE ONLY)")
 
-    # Clear all checkboxes first
+    # 1a: Clear all checkboxes
     await page.evaluate("""() => {
-        document.querySelectorAll('input[name="e[]"]').forEach(cb => { if (cb.checked) cb.click(); });
-        document.querySelectorAll('input[name="d[]"]').forEach(cb => { if (cb.checked) cb.click(); });
+        document.querySelectorAll('input[name="e[]"]:checked').forEach(cb => cb.click());
+        document.querySelectorAll('input[name="d[]"]:checked').forEach(cb => cb.click());
     }""")
     await asyncio.sleep(1)
 
-    # Select All Auction & Tender
-    await page.click("a.title-button.checkbox_on_all")
-    await asyncio.sleep(1)
-
-    # Uncheck "Today" — we only want tomorrow + future
-    # Try multiple approaches to find and uncheck today's button
-    unchecked_today = await page.evaluate("""() => {
-        // Method 1: Look for day buttons and uncheck "Today"
-        const dayButtons = Array.from(document.querySelectorAll('button.day-button'));
-        for (const btn of dayButtons) {
-            const text = btn.textContent.trim().toLowerCase();
-            if (text === 'today' || text === '今日') {
-                btn.click();
-                return 'button';
-            }
+    # 1b: Click Auction "Select All" (blue button, NOT green Kyoyuzaiko)
+    # This selects all auction types + all 113 auction sites across all days
+    await page.evaluate("""() => {
+        const btns = Array.from(document.querySelectorAll('a.title-button.checkbox_on_all'));
+        for (const b of btns) {
+            if (!b.classList.contains('title-green-button')) { b.click(); return; }
         }
-        // Method 2: Find the first day checkbox (usually today) and uncheck it
-        const firstDay = document.querySelector('input[name="d[]"]:checked');
-        if (firstDay) {
-            const label = firstDay.closest('label')?.textContent?.trim() || '';
-            // Check if it looks like today's date
-            const today = new Date();
-            const todayStr = today.getDate().toString();
-            if (label.includes(todayStr) || label.toLowerCase().includes('today')) {
-                firstDay.click();
-                return 'checkbox';
-            }
-        }
-        return 'none';
     }""")
     await asyncio.sleep(1)
-    if unchecked_today != 'none':
-        print(f"  [iauc] Unchecked today's auction (method: {unchecked_today})")
-    else:
-        print(f"  [iauc] Could not find today button — all days selected (will filter by date later)")
 
-    checked = await page.evaluate('() => document.querySelectorAll(\'input[name="d[]"]:checked\').length')
-    print(f"  [iauc] {checked} auction days selected")
+    # 1c: Click "Today" day button to UNCHECK today's sites
+    # This toggles off all auction sites that run today — we only want future
+    await page.evaluate("""() => {
+        const btns = Array.from(document.querySelectorAll('a.day-button4g, button.day-button4g'));
+        for (const b of btns) {
+            if (b.textContent.trim().toUpperCase() === 'TODAY' && b.offsetParent !== null) {
+                b.click();
+                return;
+            }
+        }
+    }""")
+    await asyncio.sleep(1)
+
+    # 1d: Verify
+    selected_info = await page.evaluate("""() => ({
+        eChecked: document.querySelectorAll('input[name="e[]"]:checked').length,
+        eTotal: document.querySelectorAll('input[name="e[]"]').length,
+        dChecked: document.querySelectorAll('input[name="d[]"]:checked').length,
+        dTotal: document.querySelectorAll('input[name="d[]"]').length,
+    })""")
+    print(f"  [iauc] Auction types: {selected_info['eChecked']}/{selected_info['eTotal']}")
+    print(f"  [iauc] Auction sites: {selected_info['dChecked']}/{selected_info['dTotal']} (Today unchecked)")
+
+    if selected_info['dChecked'] == 0:
+        print("  [iauc] No auction sites selected!")
+        return []
+
+    checked = selected_info['dChecked']
 
     if checked == 0:
         print("  [iauc] No upcoming auctions!")
@@ -386,12 +386,19 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                 new_vehicles = []
                 skipped = 0
                 skipped_date = 0
+                skipped_sold = 0
                 no_date_count = 0
                 for rv in raw_vehicles:
                     item_id = f"iauc-{rv['vid']}"
                     if item_id in existing_ids:
                         skipped += 1
                         batch_ids.append(item_id)
+                        continue
+
+                    # Skip Sold / Not Sold vehicles — they're past auction results, not upcoming
+                    result_status = rv.get("result_status", "").strip().lower()
+                    if "sold" in result_status or "negotiation" in result_status or "bid-closed" in result_status:
+                        skipped_sold += 1
                         continue
 
                     vehicle = _parse_list_row(rv)
@@ -410,9 +417,9 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                     new_vehicles.append((vehicle, rv['vid']))
 
                 total_on_page = len(raw_vehicles)
-                print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {total_on_page} on page ({len(new_vehicles)} new, {skipped} existing)")
+                print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {total_on_page} on page ({len(new_vehicles)} new, {skipped} existing, {skipped_sold} sold)")
                 if no_date_count:
-                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {no_date_count} vehicles have no list-page date (will get from detail page)")
+                    print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: {no_date_count} no list-page date (detail page)")
                 if skipped_date:
                     print(f"  [iauc] P{pass_idx + 1} Batch {batch_num} p{page_num}: skipped {skipped_date} past dates")
 
