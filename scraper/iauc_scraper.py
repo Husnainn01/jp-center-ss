@@ -273,6 +273,47 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                     break
                 await asyncio.sleep(1)
 
+            # Filter: "Yet To Be Auctioned" only (skip Sold, Temporary)
+            # Opens Result filter popup → iframe → check "Yet To Be Auctioned" → OK
+            try:
+                await page.evaluate("""() => {
+                    const links = Array.from(document.querySelectorAll('a'));
+                    for (const a of links) {
+                        if (a.getAttribute('data-element') === 'transactionStatusId') { a.click(); return; }
+                    }
+                }""")
+                await asyncio.sleep(3)
+                iframe_el = await page.query_selector('#narrow_iframe')
+                if iframe_el:
+                    iframe = await iframe_el.content_frame()
+                    if iframe:
+                        await iframe.evaluate("""() => {
+                            const cbs = document.querySelectorAll('input[type=checkbox]');
+                            for (const cb of cbs) { if (cb.checked) cb.click(); }
+                            for (const cb of cbs) {
+                                const label = cb.closest('label')?.textContent?.trim() || '';
+                                if (label.includes('Yet To Be')) { cb.click(); return; }
+                            }
+                        }""")
+                        await asyncio.sleep(1)
+                        await page.evaluate("""() => {
+                            const okBtn = document.querySelector('.modal.in .narrow_button, #narrow_modal .narrow_button');
+                            if (okBtn) {
+                                okBtn.setAttribute('data-element', 'transactionStatusId');
+                                okBtn.setAttribute('data-type', 'narrow');
+                                okBtn.click();
+                            }
+                        }""")
+                        await asyncio.sleep(3)
+                        # Wait for filtered results
+                        for _ in range(10):
+                            cnt = await page.evaluate("() => document.querySelectorAll('tr.scroll-anchor.line-auction').length")
+                            if cnt > 0: break
+                            await asyncio.sleep(1)
+                        print(f"  [iauc] Filtered to 'Yet To Be Auctioned' only")
+            except Exception as e:
+                print(f"  [iauc] Result filter failed (non-fatal): {e}")
+
             # Switch to 100 items per page for faster pagination (default is 15)
             # The page has a <select id="select_limit"> with onchange="get_carlist(this)"
             switched = await page.evaluate("""() => {
