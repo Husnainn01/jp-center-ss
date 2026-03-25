@@ -12,27 +12,60 @@ from db import upsert_auctions, get_existing_item_ids, normalize_auction_date
 from storage import upload_image
 from jst import should_scrape_today, get_target_date, now_jst, today_jst
 
-# Japanese makers first, foreign after — ensures JP brands get scraped first
+# All USS brand codes — complete list from the USS auction system
+# Japanese makers first (highest volume), then foreign
+BRAND_CODES = {
+    # Japanese makers
+    "TOYOTA": "01", "LEXUS": "00", "NISSAN": "04", "HONDA": "06",
+    "MAZDA": "10", "MITSUBISHI": "08", "SUBARU": "14", "DAIHATSU": "15",
+    "SUZUKI": "16", "ISUZU": "17", "HINO": "18", "EUNOS": "12",
+    "MITSUOKA": "19",
+    # German makers
+    "MERCEDES BENZ": "40", "BMW": "44", "AUDI": "46", "VOLKSWAGEN": "47",
+    "PORSCHE": "49", "OPEL": "48", "SMART": "43",
+    # British makers
+    "JAGUAR": "50", "LAND ROVER": "51", "BENTLEY": "53", "ROLLS ROYCE": "54",
+    "ASTON MARTIN": "55", "MINI": "56", "LOTUS": "57", "ROVER": "58",
+    "MG": "59",
+    # Italian makers
+    "ALFA ROMEO": "73", "FIAT": "74", "FERRARI": "70", "MASERATI": "71",
+    "LAMBORGHINI": "72", "LANCIA": "75", "ABARTH": "76",
+    # French makers
+    "PEUGEOT": "81", "RENAULT": "82", "CITROEN": "83",
+    # American makers
+    "CADILLAC": "20", "CHEVROLET": "21", "PONTIAC": "22", "BUICK": "23",
+    "OLDSMOBILE": "24", "SATURN": "25", "GMC": "26", "HUMMER": "27",
+    "FORD": "29", "LINCOLN": "30", "MERCURY": "31",
+    "CHRYSLER JEEP": "32", "DODGE": "33", "CHRYSLER": "34",
+    # Swedish
+    "VOLVO": "90", "SAAB": "91",
+    # Korean
+    "HYUNDAI": "60", "KIA": "61", "DAEWOO": "62", "SSANGYONG": "63",
+    # Others
+    "TESLA": "95", "BYD": "96",
+}
+
+# Scrape order: Japanese first (highest volume), then popular foreign, then rest
 JAPANESE_MAKERS = [
     "TOYOTA", "LEXUS", "NISSAN", "HONDA", "MAZDA", "MITSUBISHI",
-    "SUBARU", "DAIHATSU", "SUZUKI", "ISUZU", "EUNOS", "MITSUOKA",
+    "SUBARU", "DAIHATSU", "SUZUKI", "ISUZU", "HINO", "EUNOS", "MITSUOKA",
 ]
 FOREIGN_MAKERS = [
-    "MERCEDES BENZ", "BMW", "AUDI", "VOLKSWAGEN", "PORSCHE",
-    "VOLVO", "MINI", "PEUGEOT", "ALFA ROMEO",
-    "CHEVROLET", "CADILLAC", "FORD", "DODGE", "CHRYSLER JEEP",
+    # High volume foreign
+    "MERCEDES BENZ", "BMW", "AUDI", "VOLKSWAGEN", "PORSCHE", "VOLVO", "MINI",
+    # Medium volume
+    "PEUGEOT", "ALFA ROMEO", "FIAT", "RENAULT", "CITROEN",
+    "CHEVROLET", "CADILLAC", "FORD", "DODGE", "CHRYSLER JEEP", "CHRYSLER",
+    "JAGUAR", "LAND ROVER", "BENTLEY", "MASERATI", "FERRARI",
+    # Lower volume
+    "SMART", "OPEL", "ABARTH", "ROLLS ROYCE", "ASTON MARTIN", "LOTUS",
+    "LAMBORGHINI", "ROVER", "MG", "LANCIA",
+    "HYUNDAI", "KIA", "DAEWOO", "SSANGYONG",
+    "TESLA", "BYD",
+    "LINCOLN", "MERCURY", "PONTIAC", "BUICK", "OLDSMOBILE", "SATURN",
+    "GMC", "HUMMER", "SAAB",
 ]
 ALL_MAKERS = JAPANESE_MAKERS + FOREIGN_MAKERS
-
-BRAND_CODES = {
-    "LEXUS": "00", "TOYOTA": "01", "NISSAN": "04", "HONDA": "06",
-    "MAZDA": "10", "MITSUBISHI": "08", "SUBARU": "14", "DAIHATSU": "15",
-    "SUZUKI": "16", "ISUZU": "17", "EUNOS": "12", "MITSUOKA": "19",
-    "MERCEDES BENZ": "40", "BMW": "44", "AUDI": "46", "VOLKSWAGEN": "47",
-    "PORSCHE": "49", "VOLVO": "90", "MINI": "56", "PEUGEOT": "81",
-    "ALFA ROMEO": "73", "CHEVROLET": "21", "CADILLAC": "20", "FORD": "29",
-    "DODGE": "33", "CHRYSLER JEEP": "32",
-}
 
 # No artificial caps — scrape everything
 MAX_PAGES_PER_MAKER = 999
@@ -214,9 +247,9 @@ async def _scrape_maker(page: Page, context: BrowserContext, maker: str, existin
         except Exception as e:
             print(f"  [ninja] {maker} allSearch failed: {e}")
 
-    # >1000: search model by model — scrape ALL models (smallest first for fast coverage)
-    models.sort(key=lambda m: m["count"])
-    print(f"  [ninja] {maker}: searching all {len(models)} models (smallest first)...")
+    # >1000: search model by model — LARGEST first so popular models get priority
+    models.sort(key=lambda m: -m["count"])
+    print(f"  [ninja] {maker}: searching all {len(models)} models (largest first)...")
 
     all_ids = []
     for model in models:
@@ -315,13 +348,66 @@ async def _scrape_single_model(page: Page, context: BrowserContext, maker: str, 
         await asyncio.sleep(2)
 
         sub_body = await page.inner_text("body")
-        if "more than 1,000" in sub_body.lower() or "1,000items" in sub_body.lower():
-            print(f"  [ninja] {maker} > {model['name']} [{bt['label']}]: still >1000, scraping what we can")
+        if "more than 1,000" not in sub_body.lower() and "1,000items" not in sub_body.lower():
+            # Under 1000 — scrape normally
+            ids = await _paginate_results(page, context, maker, existing_ids, maker_start)
+            sub_ids.extend(ids)
+            if ids:
+                print(f"  [ninja] {maker} > {model['name']} [{bt['label']}]: {len(ids)} vehicles")
+        else:
+            # Still >1000 even with body type filter — split by year ranges
+            print(f"  [ninja] {maker} > {model['name']} [{bt['label']}]: >1000, splitting by year...")
+            year_ranges = [
+                ("2023", "2026"),  # newest first
+                ("2020", "2022"),
+                ("2017", "2019"),
+                ("2014", "2016"),
+                ("2010", "2013"),
+                ("2005", "2009"),
+                ("1990", "2004"),
+            ]
+            for yr_from, yr_to in year_ranges:
+                if time.time() - maker_start >= MAX_TIME_PER_MAKER:
+                    break
+                # Re-select maker, body type, model, then set year range
+                page = await _select_maker(page, brand_code, context)
+                await page.evaluate("""(btValue) => {
+                    document.querySelectorAll('input[name="bodytype"]').forEach(cb => {
+                        if (cb.checked) cb.click();
+                    });
+                    document.querySelectorAll('input[name="bodytype"]').forEach(cb => {
+                        if (cb.value === btValue && !cb.checked) cb.click();
+                    });
+                }""", bt["value"])
+                await asyncio.sleep(0.3)
+                # Set year range via JS (NINJA has seniNenFrom/seniNenTo fields)
+                await page.evaluate(f"""() => {{
+                    var fromSel = document.querySelector('select[name="seniNenFrom"], #seniNenFrom');
+                    var toSel = document.querySelector('select[name="seniNenTo"], #seniNenTo');
+                    if (fromSel) fromSel.value = '{yr_from}';
+                    if (toSel) toSel.value = '{yr_to}';
+                }}""")
+                await asyncio.sleep(0.3)
+                await page.evaluate(f"() => makerListChoiceCarCat('{cat_id}')")
+                await page.wait_for_load_state("networkidle", timeout=30000)
+                await asyncio.sleep(2)
 
-        ids = await _paginate_results(page, context, maker, existing_ids, maker_start)
-        sub_ids.extend(ids)
-        if ids:
-            print(f"  [ninja] {maker} > {model['name']} [{bt['label']}]: {len(ids)} vehicles")
+                yr_body = await page.inner_text("body")
+                if "more than 1,000" in yr_body.lower() or "1,000items" in yr_body.lower():
+                    print(f"  [ninja] {maker} > {model['name']} [{bt['label']}] {yr_from}-{yr_to}: still >1000, getting first 1000")
+
+                ids = await _paginate_results(page, context, maker, existing_ids, maker_start)
+                sub_ids.extend(ids)
+                if ids:
+                    print(f"  [ninja] {maker} > {model['name']} [{bt['label']}] {yr_from}-{yr_to}: {len(ids)} vehicles")
+
+                # Reset year filters for next iteration
+                await page.evaluate("""() => {
+                    var fromSel = document.querySelector('select[name="seniNenFrom"], #seniNenFrom');
+                    var toSel = document.querySelector('select[name="seniNenTo"], #seniNenTo');
+                    if (fromSel) fromSel.value = '';
+                    if (toSel) toSel.value = '';
+                }""")
 
     return sub_ids
 
@@ -331,6 +417,7 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
     No detail page clicks needed — all fields + thumbnail extracted in one JS call per page."""
     all_ids = []
     page_num = 0
+    consecutive_all_existing = 0
 
     # Switch to 100 items per page for fewer page loads
     await page.evaluate("""() => {
@@ -356,6 +443,10 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
             break
         if len(all_ids) >= MAX_VEHICLES_PER_MAKER:
             print(f"  [ninja] {maker}: vehicle limit reached ({len(all_ids)}/{MAX_VEHICLES_PER_MAKER}), stopping pagination")
+            break
+        # Early exit: skip rest if many consecutive pages have 0 new vehicles
+        if consecutive_all_existing >= 10:
+            print(f"  [ninja] {maker}: 10 consecutive pages with 0 new — skipping rest")
             break
 
         page_num += 1
@@ -435,7 +526,13 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
         print(f"  [ninja] {maker} p{page_num}: {len(raw_vehicles)} vehicles ({skipped} existing, {len(new_vehicles)} new)")
 
         if skipped_date:
-            print(f"  [ninja] {maker} p{page_num}: skipped {skipped_date} vehicles with past auction dates")
+            print(f"  [ninja] {maker} p{page_num}: skipped {skipped_date} past dates")
+
+        # Track consecutive all-existing pages for early exit
+        if len(new_vehicles) == 0 and len(raw_vehicles) > 0:
+            consecutive_all_existing += 1
+        else:
+            consecutive_all_existing = 0
 
         # Fetch exhibit sheets via new-tab form submission + upload thumbnails
         if new_vehicles:
@@ -443,8 +540,9 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
             sheet_urls = {}
             sheet_errors = 0
             for vehicle, _ in new_vehicles:
-                # Stop fetching sheets if main page is broken (avoid cascade)
-                if sheet_errors >= 2:
+                # Stop fetching sheets if main page is broken (5 consecutive failures = page likely dead)
+                if sheet_errors >= 5:
+                    print(f"  [ninja] {maker} p{page_num}: too many sheet errors, skipping remaining")
                     break
                 rv_match = next((rv for rv in raw_vehicles if rv['bidNo'] == vehicle['lot_number']), None)
                 if not rv_match:

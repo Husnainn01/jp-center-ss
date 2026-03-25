@@ -56,6 +56,12 @@ auctionsRouter.get("/", async (req, res) => {
     }
     if (auctionDay) {
       where.auctionDateNorm = new Date(auctionDay);
+    } else if (status === "upcoming") {
+      // For upcoming auctions, only show FUTURE dates (tomorrow onwards)
+      // Today's auctions are useless — they've already started
+      const tomorrow = new Date(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" }));
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      where.auctionDateNorm = { gte: tomorrow };
     }
     if (minPrice || maxPrice) {
       where.startPrice = {};
@@ -96,7 +102,7 @@ auctionsRouter.get("/", async (req, res) => {
         FROM auctions
         WHERE status = 'upcoming'
           AND auction_date_norm IS NOT NULL
-          AND auction_date_norm >= (NOW() AT TIME ZONE 'Asia/Tokyo')::date
+          AND auction_date_norm > (NOW() AT TIME ZONE 'Asia/Tokyo')::date
           ${maker ? Prisma.sql`AND maker = ${maker}` : Prisma.empty}
           ${model ? Prisma.sql`AND model = ${model}` : Prisma.empty}
           ${location ? Prisma.sql`AND location = ${location}` : Prisma.empty}

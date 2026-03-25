@@ -10,7 +10,7 @@ import time
 from playwright.async_api import Page, BrowserContext
 from db import upsert_auctions, get_existing_item_ids, normalize_auction_date
 from storage import upload_image
-from jst import should_scrape_today, get_target_date, now_jst
+from jst import should_scrape_today, get_target_date, now_jst, today_jst
 
 # ── Mode switch ─────────────────────────────────────────────────────────────
 # Set IAUC_OVERNIGHT=true in env to enable full overnight pass.
@@ -94,11 +94,13 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     existing_ids = get_existing_item_ids("iauc")
     print(f"  [iauc] {len(existing_ids)} existing vehicles in DB (will skip)")
 
-    # === Step 1: Select upcoming auctions (smart date based on JST) ===
-    scrape_today = should_scrape_today()
+    # === Step 1: Select upcoming auctions (FUTURE ONLY — no today) ===
     jst_now = now_jst()
-    print(f"  [iauc] JST time: {jst_now.strftime('%Y-%m-%d %H:%M')} — {'including' if scrape_today else 'excluding'} today's auctions")
+    target = get_target_date()  # tomorrow
+    print(f"  [iauc] JST time: {jst_now.strftime('%Y-%m-%d %H:%M')}")
+    print(f"  [iauc] Target: {target} onwards (tomorrow + future ONLY, skipping today)")
 
+    # Clear all checkboxes first
     await page.evaluate("""() => {
         document.querySelectorAll('input[name="e[]"]').forEach(cb => { if (cb.checked) cb.click(); });
         document.querySelectorAll('input[name="d[]"]').forEach(cb => { if (cb.checked) cb.click(); });
@@ -109,23 +111,40 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     await page.click("a.title-button.checkbox_on_all")
     await asyncio.sleep(1)
 
-    # should_scrape_today() returns True — we include today's auctions.
-    # This block only runs if should_scrape_today() is overridden to False.
-    if not scrape_today:
-        days = await page.evaluate("""() => {
-            return Array.from(document.querySelectorAll('button.day-button')).map(btn => {
-                const r = btn.getBoundingClientRect();
-                return { text: btn.textContent.trim(), x: r.x + r.width/2, y: r.y + r.height/2 };
-            });
-        }""")
-        today_btn = next((d for d in days if d['text'] == 'Today'), None)
-        if today_btn:
-            await page.mouse.click(today_btn['x'], today_btn['y'])
-            await asyncio.sleep(1)
-            print("  [iauc] Unchecked 'Today' — scraping tomorrow's auctions only")
+    # Uncheck "Today" — we only want tomorrow + future
+    # Try multiple approaches to find and uncheck today's button
+    unchecked_today = await page.evaluate("""() => {
+        // Method 1: Look for day buttons and uncheck "Today"
+        const dayButtons = Array.from(document.querySelectorAll('button.day-button'));
+        for (const btn of dayButtons) {
+            const text = btn.textContent.trim().toLowerCase();
+            if (text === 'today' || text === '今日') {
+                btn.click();
+                return 'button';
+            }
+        }
+        // Method 2: Find the first day checkbox (usually today) and uncheck it
+        const firstDay = document.querySelector('input[name="d[]"]:checked');
+        if (firstDay) {
+            const label = firstDay.closest('label')?.textContent?.trim() || '';
+            // Check if it looks like today's date
+            const today = new Date();
+            const todayStr = today.getDate().toString();
+            if (label.includes(todayStr) || label.toLowerCase().includes('today')) {
+                firstDay.click();
+                return 'checkbox';
+            }
+        }
+        return 'none';
+    }""")
+    await asyncio.sleep(1)
+    if unchecked_today != 'none':
+        print(f"  [iauc] Unchecked today's auction (method: {unchecked_today})")
+    else:
+        print(f"  [iauc] Could not find today button — all days selected (will filter by date later)")
 
     checked = await page.evaluate('() => document.querySelectorAll(\'input[name="d[]"]:checked\').length')
-    print(f"  [iauc] {checked} auction sites selected (all upcoming)")
+    print(f"  [iauc] {checked} auction days selected")
 
     if checked == 0:
         print("  [iauc] No upcoming auctions!")

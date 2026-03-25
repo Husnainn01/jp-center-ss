@@ -164,48 +164,97 @@ async def backfill_iauc(page: Page, context: BrowserContext) -> dict:
 async def backfill_ninja(page: Page, context: BrowserContext) -> dict:
     """Backfill missing exhibit sheets for NINJA/USS vehicles.
 
-    NINJA exhibit sheets require form submission from a results page.
-    We re-navigate to the detail page using the vehicle's bidNo and site info
-    extracted from the item_id (format: uss-{bidNo}-{times}).
+    Opens detail pages via form submission to fetch exhibit sheet images.
+    item_id format: uss-{bidNo}-{times}
     """
     missing = get_vehicles_missing_assets("uss")
     if not missing:
         print("[backfill] NINJA: all vehicles have images + sheets")
         return {"attempted": 0, "fixed": 0}
 
-    # NINJA list pages already extract thumbnails; most missing assets are exhibit sheets
     sheets_missing = [v for v in missing if v["missing_sheet"]]
     images_missing = [v for v in missing if v["missing_image"]]
-    print(f"[backfill] NINJA: {len(missing)} vehicles need backfill ({len(sheets_missing)} sheets, {len(images_missing)} images)")
+    print(f"[backfill] NINJA: {len(missing)} need backfill ({len(sheets_missing)} sheets, {len(images_missing)} images)")
 
-    # For NINJA, exhibit sheets require authenticated form submission which is complex.
-    # The most reliable approach: re-open the detail page via seniCarDetail JS call.
-    # However, this requires being on a results page with the vehicle listed.
-    # A simpler approach: use the exhibit sheet URL pattern if we can derive it.
-
-    # For now, focus on vehicles missing images (thumbnail from list page)
-    # Sheet backfill for NINJA requires a more complex flow (future enhancement)
-    to_fix = images_missing[:MAX_BACKFILL_PER_RUN]
+    # Focus on vehicles missing sheets (most common gap for NINJA)
+    to_fix = sheets_missing[:MAX_BACKFILL_PER_RUN]
     if not to_fix:
-        print("[backfill] NINJA: no image backfill needed (sheets require detail page — skipped)")
+        print("[backfill] NINJA: no sheet backfill needed")
+        return {"attempted": 0, "fixed": 0}
+
+    # Make sure we're on a page with form1 (search results)
+    has_form = await page.evaluate("() => !!document.getElementById('form1')")
+    if not has_form:
+        print("[backfill] NINJA: no form1 on page, cannot backfill sheets")
         return {"attempted": 0, "fixed": 0}
 
     fixed = 0
-    semaphore = asyncio.Semaphore(CONCURRENT_TABS)
+    errors = 0
 
-    async def backfill_one(vehicle: dict) -> bool:
-        async with semaphore:
-            # NINJA images are fetched from the list page during scrape.
-            # If the image was missed, we'd need to re-scrape that specific maker.
-            # For now, just log it — the next scrape cycle will pick it up
-            # since get_existing_item_ids no longer filters by image_url.
-            return False
+    for vehicle in to_fix:
+        if errors >= 5:
+            print("[backfill] NINJA: too many errors, stopping")
+            break
 
-    results = await asyncio.gather(
-        *[backfill_one(v) for v in to_fix],
-        return_exceptions=True,
-    )
-    fixed = sum(1 for r in results if r is True)
+        # Parse item_id: uss-{bidNo}-{times}
+        parts = vehicle["item_id"].split("-", 2)
+        if len(parts) < 3:
+            continue
+        bid_no = parts[1]
+        times = parts[2]
 
-    print(f"[backfill] NINJA: {fixed}/{len(to_fix)} vehicles fixed")
+        try:
+            # Submit form1 to open detail page in new tab
+            new_page_promise = context.wait_for_event("page", timeout=10000)
+            await page.evaluate("""(v) => {
+                document.getElementById('carKindType').value = '1';
+                document.getElementById('bidNo').value = v.bidNo;
+                document.getElementById('auctionCount').value = v.times;
+                document.getElementById('zaikoNo').value = '';
+                document.getElementById('action').value = 'init';
+                var form = document.getElementById('form1');
+                form.setAttribute('action', './cardetail.action');
+                form.setAttribute('target', '_blank');
+                form.submit();
+            }""", {"bidNo": bid_no, "times": times})
+
+            detail_page = await new_page_promise
+            await detail_page.wait_for_load_state("networkidle", timeout=10000)
+            await asyncio.sleep(0.5)
+
+            # Extract exhibit sheet
+            sheet_url = await detail_page.evaluate("""() => {
+                for (const img of document.querySelectorAll('img')) {
+                    if (img.src && img.src.includes('get_ex_image')) return img.src;
+                }
+                return '';
+            }""")
+
+            await detail_page.close()
+
+            if sheet_url:
+                uploaded = await _download_and_upload_bf(page, sheet_url, "ninja-images")
+                if uploaded:
+                    update_vehicle_assets(vehicle["item_id"], None, [], uploaded)
+                    fixed += 1
+                    errors = 0
+            else:
+                errors = 0  # No sheet available, not an error
+
+        except Exception as e:
+            errors += 1
+            # Close any extra pages
+            for extra in context.pages[1:]:
+                try:
+                    await extra.close()
+                except:
+                    pass
+
+    # Reset form target
+    try:
+        await page.evaluate("() => document.getElementById('form1')?.setAttribute('target', '')")
+    except:
+        pass
+
+    print(f"[backfill] NINJA: {fixed}/{len(to_fix)} sheets fixed")
     return {"attempted": len(to_fix), "fixed": fixed}
