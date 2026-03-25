@@ -16,8 +16,12 @@ MAX_BACKFILL_PER_RUN = 200  # cap per run to avoid overloading the site
 CONCURRENT_TABS = 5
 
 
+PLACEHOLDER_PATTERNS = ["now_printing", "noimage", "no_image", "dummy", "blank", "placeholder"]
+
 async def _download_and_upload_bf(page: Page, url: str, prefix: str) -> str | None:
-    """Download image via authenticated browser and upload to R2."""
+    """Download image via authenticated browser and upload to R2. Skips placeholders."""
+    if any(p in url.lower() for p in PLACEHOLDER_PATTERNS):
+        return None
     try:
         result = await page.evaluate("""async (url) => {
             try {

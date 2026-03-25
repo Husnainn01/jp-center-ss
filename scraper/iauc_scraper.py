@@ -956,8 +956,17 @@ def _parse_detail(text: str, vehicle_id: str) -> dict:
     }
 
 
+# Placeholder image URLs — skip these, they're not real car photos
+PLACEHOLDER_PATTERNS = ["now_printing", "noimage", "no_image", "dummy", "blank", "placeholder"]
+
 async def _download_and_upload(page: Page, url: str) -> str | None:
-    """Download image via authenticated browser and upload to R2. Retries once on failure."""
+    """Download image via authenticated browser and upload to R2. Retries once on failure.
+    Skips known placeholder images (now_printing.jpg etc.)."""
+    # Skip known placeholder URLs
+    url_lower = url.lower()
+    if any(p in url_lower for p in PLACEHOLDER_PATTERNS):
+        return None
+
     for attempt in range(2):
         try:
             result = await page.evaluate("""async (url) => {

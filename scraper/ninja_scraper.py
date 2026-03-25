@@ -746,8 +746,12 @@ def _parse_list_row(rv: dict, maker: str) -> dict | None:
 
 
 
+PLACEHOLDER_PATTERNS = ["now_printing", "noimage", "no_image", "dummy", "blank", "placeholder"]
+
 async def _download_and_upload(page: Page, url: str, prefix: str) -> str | None:
-    """Download image via authenticated browser and upload to R2. Retries once on failure."""
+    """Download image via authenticated browser and upload to R2. Retries once on failure. Skips placeholders."""
+    if any(p in url.lower() for p in PLACEHOLDER_PATTERNS):
+        return None
     for attempt in range(2):
         try:
             result = await page.evaluate("""async (url) => {
