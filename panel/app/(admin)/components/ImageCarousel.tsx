@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import {
   Carousel,
   CarouselContent,
@@ -19,14 +20,14 @@ function Thumb({ src, alt, onClick }: { src: string; alt: string; onClick: () =>
   const [ok, setOk] = useState(true);
   if (!ok) return null;
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
+    <Image
       src={src}
       alt={alt}
+      width={64}
+      height={48}
       className="h-12 w-16 rounded object-cover bg-muted flex-shrink-0 cursor-pointer opacity-70 hover:opacity-100 hover:ring-2 ring-primary transition-all"
       onError={() => setOk(false)}
       onClick={onClick}
-      loading="lazy"
     />
   );
 }
@@ -48,8 +49,7 @@ export function ImageCarousel({ images, alt }: ImageCarouselProps) {
     return (
       <>
         <button onClick={() => setLightbox(proxied[0])} className="w-full cursor-zoom-in">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={proxied[0]} alt={alt} className="w-full rounded-lg object-contain bg-muted" />
+          <Image src={proxied[0]} alt={alt} width={800} height={600} className="w-full rounded-lg object-contain bg-muted" />
         </button>
         {lightbox && <Lightbox src={lightbox} alt={alt} onClose={() => setLightbox(null)} />}
       </>
@@ -68,12 +68,13 @@ export function ImageCarousel({ images, alt }: ImageCarouselProps) {
                   style={{ paddingBottom: "75%" }}
                   onClick={() => setLightbox(url)}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
+                  <Image
                     src={url}
                     alt={`${alt} - ${i + 1}`}
-                    className="absolute inset-0 h-full w-full object-cover"
-                    loading={i === 0 ? "eager" : "lazy"}
+                    fill
+                    className="object-cover"
+                    sizes="(max-width: 768px) 100vw, 50vw"
+                    priority={i === 0}
                   />
                 </div>
               </CarouselItem>
@@ -103,6 +104,7 @@ function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: ()
       <button className="absolute top-4 right-4 text-white/60 hover:text-white text-3xl font-light z-50" onClick={onClose}>
         ✕
       </button>
+      {/* Lightbox uses raw img for full-resolution display */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt={alt} className="max-h-[90vh] max-w-[90vw] object-contain rounded" onClick={(e) => e.stopPropagation()} />
     </div>

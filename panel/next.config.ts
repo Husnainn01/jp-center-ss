@@ -2,6 +2,22 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "**.iauc.co.jp",
+      },
+      {
+        protocol: "https",
+        hostname: "**.aucnetcars.com",
+      },
+      {
+        protocol: "https",
+        hostname: "**.taacaa.jp",
+      },
+    ],
+  },
   async headers() {
     return [
       {

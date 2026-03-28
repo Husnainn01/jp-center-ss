@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { AuctionSerialized } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
 import { proxyUrl } from "@/lib/image";
@@ -228,8 +229,7 @@ function Content({ auctions, page, totalPages, total, filterOptions }: Props) {
                   <TableRow key={a.id} className="group text-xs">
                     <TableCell className="py-1.5">
                       {a.imageUrl ? (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={proxyUrl(a.imageUrl)} alt="" className="h-9 w-14 rounded object-cover bg-muted" loading="lazy" />
+                        <Image src={proxyUrl(a.imageUrl)} alt="" width={56} height={36} className="h-9 w-14 rounded object-cover bg-muted" />
                       ) : (
                         <div className="h-9 w-14 rounded bg-muted" />
                       )}

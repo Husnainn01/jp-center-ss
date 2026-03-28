@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { AuctionSerialized } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
 import { proxyUrl } from "@/lib/image";
@@ -119,8 +120,7 @@ export default function ListDetailPage() {
                         <TableRow key={item.id}>
                           <TableCell className="py-2">
                             {a.imageUrl ? (
-                              /* eslint-disable-next-line @next/next/no-img-element */
-                              <img src={proxyUrl(a.imageUrl)} alt="" className="h-10 w-16 rounded object-cover bg-muted" loading="lazy" />
+                              <Image src={proxyUrl(a.imageUrl)} alt="" width={64} height={40} className="h-10 w-16 rounded object-cover bg-muted" />
                             ) : (
                               <div className="h-10 w-16 rounded bg-muted" />
                             )}

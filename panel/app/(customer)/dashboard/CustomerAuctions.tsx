@@ -340,7 +340,7 @@ function Content() {
                 <div className="bg-card border border-border rounded overflow-hidden hover:border-ring/30 transition-all duration-100">
                   <div className="aspect-[16/10] bg-muted relative overflow-hidden">
                     {a.imageUrl ? (
-                      <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="(max-width: 640px) 50vw, 25vw" loading="lazy" unoptimized />
+                      <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="(max-width: 640px) 50vw, 25vw" loading="lazy" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-muted-foreground/30"><Car className="h-5 w-5" /></div>
                     )}
@@ -390,7 +390,7 @@ function Content() {
                       <Link href={`/dashboard/${a.id}`} className="absolute inset-0 z-[1]" aria-label={`${a.maker || ""} ${a.model || "Vehicle"}`} />
                       <div className="w-[44px] h-[32px] rounded-sm overflow-hidden bg-muted relative">
                         {a.imageUrl ? (
-                          <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="44px" loading="lazy" unoptimized />
+                          <Image src={proxyUrl(a.imageUrl)} alt="" fill className="object-cover" sizes="44px" loading="lazy" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-muted-foreground/30"><Car className="h-3 w-3" /></div>
                         )}
