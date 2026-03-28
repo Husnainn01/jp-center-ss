@@ -94,9 +94,14 @@ async def backfill_iauc(page: Page, context: BrowserContext) -> dict:
             try:
                 detail_url = f"https://www.iauc.co.jp/detail/?vehicleId={vid}&owner_id=&from=vehicle&id=&__tid={tid}"
                 await new_page.goto(detail_url, wait_until="domcontentloaded", timeout=20000)
-                await asyncio.sleep(2)
+                await asyncio.sleep(5)  # Wait longer for images to render
 
                 if "detail" not in new_page.url:
+                    return False
+
+                # Skip "Not Found" pages — vehicle may have been removed from iAUC
+                page_text = await new_page.evaluate("() => document.body.innerText.substring(0, 300)")
+                if "Not Found" in page_text:
                     return False
 
                 # Extract images (filter out placeholder/now_printing images)
