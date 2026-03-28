@@ -99,10 +99,15 @@ async def backfill_iauc(page: Page, context: BrowserContext) -> dict:
                 if "detail" not in new_page.url:
                     return False
 
-                # Extract images
+                # Extract images (filter out placeholder/now_printing images)
                 imgs = await new_page.evaluate("""() => {
+                    const placeholders = ['now_printing', 'noimage', 'no_image', 'dummy', 'blank', 'placeholder'];
                     return Array.from(document.querySelectorAll('img'))
-                        .filter(i => i.src && i.src.includes('iauc_pic') && i.naturalWidth > 100)
+                        .filter(i => {
+                            if (!i.src || !i.src.includes('iauc_pic') || i.naturalWidth <= 100) return false;
+                            const lower = i.src.toLowerCase();
+                            return !placeholders.some(p => lower.includes(p));
+                        })
                         .map(i => ({ src: i.src, filename: i.src.split('?')[0].split('/').pop().toUpperCase() }));
                 }""")
 

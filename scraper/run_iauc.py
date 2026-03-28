@@ -15,6 +15,7 @@ load_dotenv()
 
 from iauc_sync import run_iauc_sync
 from jst import is_overnight_window
+from cleanup import run_cleanup
 
 MAX_RETRIES = 3
 RETRY_DELAY = 60
@@ -97,10 +98,21 @@ async def main():
         id="iauc_overnight",
     )
 
+    # Daily cleanup — 11:00 JST, delete yesterday and older auctions + images
+    scheduler.add_job(
+        run_cleanup,
+        "cron",
+        hour=11,
+        minute=0,
+        timezone="Asia/Tokyo",
+        id="iauc_cleanup",
+    )
+
     scheduler.start()
     print(f"[iauc] Scheduler running.")
-    print(f"[iauc]   Delta  → every {interval} min")
+    print(f"[iauc]   Delta     → every {interval} min")
     print(f"[iauc]   Overnight → 23:00 JST daily (full 40k pass)")
+    print(f"[iauc]   Cleanup   → 11:00 JST daily (delete expired auctions)")
 
     try:
         while True:

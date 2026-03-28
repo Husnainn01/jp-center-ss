@@ -280,8 +280,8 @@ def get_expired_auctions_with_images() -> list[dict]:
 
 
 def delete_expired_auctions() -> int:
-    """Delete auctions before target date (today). Yesterday and older get removed. Returns count deleted."""
-    cutoff = get_target_date()
+    """Delete auctions before today JST. Yesterday and older get removed. Returns count deleted."""
+    cutoff = today_jst()
     session = Session()
     try:
         # First delete car_list_items that reference these auctions

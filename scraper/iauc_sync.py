@@ -8,7 +8,6 @@ from playwright.async_api import async_playwright
 from iauc_login import iauc_login, iauc_logout
 from iauc_scraper import iauc_search_and_extract
 from db import log_sync, get_site_credentials, is_site_enabled
-from cleanup import run_cleanup
 
 BACKEND_URL = os.getenv("BACKEND_URL", "https://skillful-grace-production-377c.up.railway.app")
 
@@ -73,14 +72,6 @@ async def run_iauc_sync():
                 print(f"[iauc-sync] Backfill: {bf_result['fixed']}/{bf_result['attempted']} fixed")
             except Exception as be:
                 print(f"[iauc-sync] Backfill error (non-fatal): {be}")
-
-            # Cleanup expired auctions + R2 images
-            print("[iauc-sync] Running cleanup of expired auctions...")
-            try:
-                cleanup_result = run_cleanup()
-                print(f"[iauc-sync] Cleanup: {cleanup_result['expired_auctions']} auctions deleted, {cleanup_result['r2_images_deleted']} R2 images deleted")
-            except Exception as ce:
-                print(f"[iauc-sync] Cleanup error (non-fatal): {ce}")
 
             # Verify completeness
             try:

@@ -9,6 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 load_dotenv()
 
 from ninja_sync import run_ninja_sync
+from cleanup import run_cleanup
 
 MAX_RETRIES = 3
 RETRY_DELAY = 60  # seconds
@@ -40,9 +41,21 @@ async def main():
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(run_with_retry, "interval", minutes=interval, id="ninja_sync")
+
+    # Daily cleanup — 11:00 JST, delete yesterday and older auctions + images
+    scheduler.add_job(
+        run_cleanup,
+        "cron",
+        hour=11,
+        minute=0,
+        timezone="Asia/Tokyo",
+        id="ninja_cleanup",
+    )
+
     scheduler.start()
 
     print(f"[ninja] Scheduler running. Next sync in {interval} minutes.")
+    print(f"[ninja]   Cleanup → 11:00 JST daily (delete expired auctions)")
 
     try:
         while True:

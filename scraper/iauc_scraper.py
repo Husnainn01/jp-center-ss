@@ -518,10 +518,15 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
                                         if len(parts) == 2 and parts[0].strip() == "Holding Date":
                                             holding_date = parts[1].strip()
 
-                                # Extract images
+                                # Extract images (filter out placeholder/now_printing images)
                                 imgs = await new_page.evaluate("""() => {
+                                    const placeholders = ['now_printing', 'noimage', 'no_image', 'dummy', 'blank', 'placeholder'];
                                     return Array.from(document.querySelectorAll('img'))
-                                        .filter(i => i.src && i.src.includes('iauc_pic') && i.naturalWidth > 100)
+                                        .filter(i => {
+                                            if (!i.src || !i.src.includes('iauc_pic') || i.naturalWidth <= 100) return false;
+                                            const lower = i.src.toLowerCase();
+                                            return !placeholders.some(p => lower.includes(p));
+                                        })
                                         .map(i => ({ src: i.src, filename: i.src.split('?')[0].split('/').pop().toUpperCase() }));
                                 }""")
 
@@ -684,6 +689,25 @@ def _parse_list_row(rv: dict) -> dict | None:
             if len(part) == 8 and part.isdigit() and part.startswith("20"):
                 auction_date = f"{part[:4]}/{part[4:6]}/{part[6:8]}"
                 break
+
+    # Fallback: parse date from result_status column (e.g., "Apr 01\n00:00" or "Mar 31\n00:00")
+    if not auction_date:
+        result_status_raw = rv.get("result_status", "")
+        if result_status_raw:
+            date_line = result_status_raw.split("\n")[0].strip()
+            # Match "Apr 01" or "Mar 31" etc.
+            month_map = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+                         "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+            m = re.match(r'([A-Za-z]{3})\s+(\d{1,2})', date_line)
+            if m:
+                month_num = month_map.get(m.group(1).lower())
+                day_num = int(m.group(2))
+                if month_num and 1 <= day_num <= 31:
+                    # Use current year, but handle Dec→Jan rollover
+                    year_num = now_jst().year
+                    if month_num < now_jst().month - 6:
+                        year_num += 1  # e.g., seeing "Jan" in December
+                    auction_date = f"{year_num}/{month_num:02d}/{day_num:02d}"
 
     # Model / Grade from col3 (e.g., "Aerio ／ 1.5 XR\nBid Free")
     model_grade = rv.get("model_grade", "")

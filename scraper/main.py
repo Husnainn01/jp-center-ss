@@ -11,6 +11,7 @@ from sync import run_sync
 from ninja_sync import run_ninja_sync
 from taa_sync import run_taa_sync
 from iauc_sync import run_iauc_sync
+from cleanup import run_cleanup
 
 
 async def run_all():
@@ -51,9 +52,21 @@ async def main():
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(run_all, "interval", minutes=interval, id="sync_all")
+
+    # Daily cleanup — 11:00 JST, delete yesterday and older auctions + images
+    scheduler.add_job(
+        run_cleanup,
+        "cron",
+        hour=11,
+        minute=0,
+        timezone="Asia/Tokyo",
+        id="daily_cleanup",
+    )
+
     scheduler.start()
 
     print(f"[main] Scheduler running. Next sync in {interval} minutes.")
+    print(f"[main]   Cleanup → 11:00 JST daily (delete expired auctions)")
     print("[main] Press Ctrl+C to stop.\n")
 
     try:
