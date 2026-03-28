@@ -100,25 +100,38 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
     print(f"  [iauc] JST time: {jst_now.strftime('%Y-%m-%d %H:%M')}")
     print(f"  [iauc] Target: {target} onwards (FUTURE ONLY)")
 
-    # 1a: Clear all checkboxes
+    # 1a: Select ALL auction sites (d[]) directly — check every unchecked one
+    # The "Select All" button only selects today's active sites and misses future
+    # days in "Preparing" status (Honda, AUCNET, JU Tokyo, etc.), so we check
+    # every d[] checkbox manually to include ALL sites across ALL days.
     await page.evaluate("""() => {
-        document.querySelectorAll('input[name="e[]"]:checked').forEach(cb => cb.click());
-        document.querySelectorAll('input[name="d[]"]:checked').forEach(cb => cb.click());
+        document.querySelectorAll('input[name="d[]"]').forEach(cb => {
+            if (!cb.checked) cb.click();
+        });
     }""")
     await asyncio.sleep(1)
 
-    # 1b: Click Auction "Select All" (blue button, NOT green Kyoyuzaiko)
-    # This selects all auction types + all 113 auction sites across all days
+    # 1b: Also select all auction types (e[])
     await page.evaluate("""() => {
-        const btns = Array.from(document.querySelectorAll('a.title-button.checkbox_on_all'));
-        for (const b of btns) {
-            if (!b.classList.contains('title-green-button')) { b.click(); return; }
-        }
+        document.querySelectorAll('input[name="e[]"]').forEach(cb => {
+            if (!cb.checked) cb.click();
+        });
     }""")
     await asyncio.sleep(1)
 
-    # 1c: Click "Today" day button to UNCHECK today's sites
-    # This toggles off all auction sites that run today — we only want future
+    # 1c: Uncheck AUCNET site — scraped separately by the Aucnet scraper
+    await page.evaluate("""() => {
+        document.querySelectorAll('input[name="d[]"]:checked').forEach(cb => {
+            const box = cb.closest('.sitebox-blue, .sitebox-green, label');
+            const title = box ? (box.title || box.getAttribute('title') || '') : '';
+            if (title.startsWith('AUCNET') && !title.includes('Kyoyuzaiko')) {
+                cb.click();
+            }
+        });
+    }""")
+    await asyncio.sleep(0.5)
+
+    # 1d: Click "Today" day button to UNCHECK today's sites — we only want future
     await page.evaluate("""() => {
         const btns = Array.from(document.querySelectorAll('a.day-button4g, button.day-button4g'));
         for (const b of btns) {
@@ -142,12 +155,6 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
 
     if selected_info['dChecked'] == 0:
         print("  [iauc] No auction sites selected!")
-        return []
-
-    checked = selected_info['dChecked']
-
-    if checked == 0:
-        print("  [iauc] No upcoming auctions!")
         return []
 
     # === Step 2: Go to Make & Model ===
