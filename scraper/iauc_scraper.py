@@ -37,26 +37,23 @@ async def _select_makers(page: Page, maker_names: set[str] | None = None):
     maker_names=None → select all makers (overnight behavior).
     maker_names=set  → select only makers whose label matches."""
     if maker_names is None:
-        # Click both "All" buttons (Japanese + Imported sections)
+        # Click both "All" buttons by ID (domestic + foreign makers)
         await page.evaluate("""() => {
-            const allBtns = Array.from(document.querySelectorAll('button'))
-                .filter(b => b.textContent.trim() === 'All' && b.offsetParent !== null);
-            allBtns.forEach(b => b.click());
+            const domestic = document.getElementById('maker-domestic-all');
+            const foreign = document.getElementById('maker-foreign-all');
+            if (domestic) domestic.click();
+            if (foreign) foreign.click();
         }""")
         await asyncio.sleep(2)
-        # Fallback: click each maker via mouse
-        makers_checked = await page.evaluate('() => document.querySelectorAll(\'input[name="maker[]"]:checked\').length')
+        # Fallback: check every maker checkbox directly via JS
+        makers_checked = await page.evaluate("""() => document.querySelectorAll('input[name="maker[]"]:checked').length""")
         if makers_checked == 0:
-            print("  [iauc] All buttons didn't work, clicking makers manually...")
-            maker_boxes = await page.evaluate("""() => {
-                return Array.from(document.querySelectorAll('li.search-maker-checkbox')).map(li => {
-                    const r = li.getBoundingClientRect();
-                    return { text: li.textContent.trim(), x: r.x + r.width/2, y: r.y + r.height/2, visible: r.y > 0 };
-                }).filter(m => m.visible);
+            print("  [iauc] All buttons didn't work, checking maker checkboxes directly...")
+            await page.evaluate("""() => {
+                document.querySelectorAll('input[name="maker[]"]').forEach(cb => {
+                    if (!cb.checked) cb.click();
+                });
             }""")
-            for m in maker_boxes:
-                await page.mouse.click(m['x'], m['y'])
-                await asyncio.sleep(0.2)
     else:
         # First uncheck all makers
         await page.evaluate("""() => {
@@ -81,7 +78,29 @@ async def _select_makers(page: Page, maker_names: set[str] | None = None):
         print(f"  [iauc] Clicked {clicked} makers matching filter")
 
     await asyncio.sleep(2)
-    makers_checked = await page.evaluate('() => document.querySelectorAll(\'input[name="maker[]"]:checked\').length')
+    makers_checked = await page.evaluate("""() => document.querySelectorAll('input[name="maker[]"]:checked').length""")
+    # If still 0, the page may not have loaded — wait and retry once
+    if makers_checked == 0:
+        print("  [iauc] 0 makers — page may not have loaded, waiting and retrying...")
+        await asyncio.sleep(5)
+        # Try buttons again
+        await page.evaluate("""() => {
+            const d = document.getElementById('maker-domestic-all');
+            const f = document.getElementById('maker-foreign-all');
+            if (d) d.click();
+            if (f) f.click();
+        }""")
+        await asyncio.sleep(2)
+        makers_checked = await page.evaluate("""() => document.querySelectorAll('input[name="maker[]"]:checked').length""")
+        if makers_checked == 0:
+            # Last resort: direct checkbox click
+            await page.evaluate("""() => {
+                document.querySelectorAll('input[name="maker[]"]').forEach(cb => {
+                    if (!cb.checked) cb.click();
+                });
+            }""")
+            await asyncio.sleep(1)
+            makers_checked = await page.evaluate("""() => document.querySelectorAll('input[name="maker[]"]:checked').length""")
     print(f"  [iauc] {makers_checked} makers selected")
     return makers_checked
 
@@ -672,7 +691,13 @@ async def iauc_search_and_extract(page: Page, context: BrowserContext) -> list[s
             # Reload Make & Model page fresh for next batch
             search_url = search_base_url + "#maker"
             await page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
-            await asyncio.sleep(3)
+            # Wait for maker checkboxes to render (SPA loads them async)
+            for _ in range(15):
+                await asyncio.sleep(1)
+                maker_count = await page.evaluate("""() => document.querySelectorAll('input[name="maker[]"]').length""")
+                if maker_count > 0:
+                    break
+            await asyncio.sleep(1)
             # Re-select makers for this pass
             await _select_makers(page, maker_filter)
 
