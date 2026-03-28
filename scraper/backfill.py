@@ -17,9 +17,10 @@ CONCURRENT_TABS = 5
 
 
 PLACEHOLDER_PATTERNS = ["now_printing", "noimage", "no_image", "dummy", "blank", "placeholder"]
+MIN_REAL_IMAGE_SIZE = 15000  # 15KB — real car photos are 30KB+, placeholders are under 15KB
 
 async def _download_and_upload_bf(page: Page, url: str, prefix: str) -> str | None:
-    """Download image via authenticated browser and upload to R2. Skips placeholders."""
+    """Download image via authenticated browser and upload to R2. Skips placeholders by URL and size."""
     if any(p in url.lower() for p in PLACEHOLDER_PATTERNS):
         return None
     try:
@@ -35,6 +36,8 @@ async def _download_and_upload_bf(page: Page, url: str, prefix: str) -> str | No
         if result and result.startswith("data:"):
             b64 = result.split(",", 1)[1]
             img_bytes = base64.b64decode(b64)
+            if len(img_bytes) < MIN_REAL_IMAGE_SIZE:
+                return None  # Placeholder image (too small)
             if len(img_bytes) > 500:
                 return upload_image(img_bytes, prefix, url)
         return None
@@ -54,25 +57,53 @@ async def backfill_iauc(page: Page, context: BrowserContext) -> dict:
     print(f"[backfill] iAUC: {len(missing)} vehicles need backfill (processing up to {MAX_BACKFILL_PER_RUN})")
     missing = missing[:MAX_BACKFILL_PER_RUN]
 
-    # Get __tid from current page session
-    tid = await page.evaluate("""() => {
-        for (const a of document.querySelectorAll('a[href*="__tid"]')) {
-            const m = a.href.match(/__tid=([^&#]+)/);
-            if (m) return m[1];
-        }
-        return '';
-    }""")
+    # Get __tid from current page URL, links, or HTML
+    tid = ""
+    # 1. From current page URL
+    import re as _re
+    url_match = _re.search(r'__tid=([a-f0-9]+)', page.url)
+    if url_match:
+        tid = url_match.group(1)
 
+    # 2. From links on page
     if not tid:
-        # Try to get tid from any link on the page
         tid = await page.evaluate("""() => {
-            const m = document.body.innerHTML.match(/__tid=([a-f0-9]+)/);
+            for (const a of document.querySelectorAll('a[href*="__tid"]')) {
+                const m = a.href.match(/__tid=([^&#]+)/);
+                if (m) return m[1];
+            }
+            return '';
+        }""")
+
+    # 3. From any HTML content (broader regex)
+    if not tid:
+        tid = await page.evaluate("""() => {
+            const m = document.body.innerHTML.match(/__tid=([a-zA-Z0-9]+)/);
             return m ? m[1] : '';
         }""")
 
+    # 4. Last resort: navigate to the main search page to get a fresh __tid
     if not tid:
-        print("[backfill] iAUC: no __tid found, cannot backfill")
+        print("[backfill] iAUC: no __tid on current page, navigating to search page...")
+        await page.goto("https://www.iauc.co.jp/vehicle/", wait_until="domcontentloaded", timeout=20000)
+        await asyncio.sleep(3)
+        url_match = _re.search(r'__tid=([a-f0-9]+)', page.url)
+        if url_match:
+            tid = url_match.group(1)
+        if not tid:
+            tid = await page.evaluate("""() => {
+                for (const a of document.querySelectorAll('a[href*="__tid"]')) {
+                    const m = a.href.match(/__tid=([^&#]+)/);
+                    if (m) return m[1];
+                }
+                return '';
+            }""")
+
+    if not tid:
+        print("[backfill] iAUC: no __tid found after all attempts, cannot backfill")
         return {"attempted": 0, "fixed": 0}
+
+    print(f"[backfill] iAUC: got __tid: {tid[:20]}...")
 
     fixed = 0
     semaphore = asyncio.Semaphore(CONCURRENT_TABS)

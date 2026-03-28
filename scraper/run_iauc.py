@@ -98,10 +98,12 @@ async def main():
         id="iauc_overnight",
     )
 
-    # Daily cleanup — 11:00 JST, delete yesterday and older auctions + images
+    # Weekday cleanup — 11:00 JST Mon-Thu, delete yesterday and older auctions + images
+    # Skip Fri (keeps weekend data), Sat, Sun (no auctions)
     scheduler.add_job(
         run_cleanup,
         "cron",
+        day_of_week="mon-fri",
         hour=11,
         minute=0,
         timezone="Asia/Tokyo",

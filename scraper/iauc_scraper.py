@@ -1015,9 +1015,11 @@ def _parse_detail(text: str, vehicle_id: str) -> dict:
 # Placeholder image URLs — skip these, they're not real car photos
 PLACEHOLDER_PATTERNS = ["now_printing", "noimage", "no_image", "dummy", "blank", "placeholder"]
 
+MIN_REAL_IMAGE_SIZE = 15000  # 15KB — real car photos are 30KB+, placeholders are under 15KB
+
 async def _download_and_upload(page: Page, url: str) -> str | None:
     """Download image via authenticated browser and upload to R2. Retries once on failure.
-    Skips known placeholder images (now_printing.jpg etc.)."""
+    Skips known placeholder images by URL pattern and by file size (<15KB)."""
     # Skip known placeholder URLs
     url_lower = url.lower()
     if any(p in url_lower for p in PLACEHOLDER_PATTERNS):
@@ -1037,6 +1039,9 @@ async def _download_and_upload(page: Page, url: str) -> str | None:
             if result and result.startswith("data:"):
                 b64 = result.split(",", 1)[1]
                 img_bytes = base64.b64decode(b64)
+                # Skip tiny images (<15KB) — likely placeholders like "Now Printing"
+                if len(img_bytes) < MIN_REAL_IMAGE_SIZE:
+                    return None
                 if len(img_bytes) > 500:
                     return upload_image(img_bytes, "iauc-images", url)
             if attempt == 0:

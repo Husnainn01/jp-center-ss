@@ -42,10 +42,11 @@ async def main():
     scheduler = AsyncIOScheduler()
     scheduler.add_job(run_with_retry, "interval", minutes=interval, id="aucnet_sync")
 
-    # Daily cleanup — 11:00 JST, delete yesterday and older auctions + images
+    # Weekday cleanup — 11:00 JST Mon-Fri, skip weekends (no auctions)
     scheduler.add_job(
         run_cleanup,
         "cron",
+        day_of_week="mon-fri",
         hour=11,
         minute=0,
         timezone="Asia/Tokyo",
@@ -55,7 +56,7 @@ async def main():
     scheduler.start()
 
     print(f"[aucnet] Scheduler running. Next sync in {interval} minutes.")
-    print(f"[aucnet]   Cleanup → 11:00 JST daily (delete expired auctions)")
+    print(f"[aucnet]   Cleanup → 11:00 JST Mon-Fri (delete expired auctions)")
 
     try:
         while True:

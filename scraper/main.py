@@ -53,10 +53,11 @@ async def main():
     scheduler = AsyncIOScheduler()
     scheduler.add_job(run_all, "interval", minutes=interval, id="sync_all")
 
-    # Daily cleanup — 11:00 JST, delete yesterday and older auctions + images
+    # Weekday cleanup — 11:00 JST Mon-Thu, skip weekends (no auctions)
     scheduler.add_job(
         run_cleanup,
         "cron",
+        day_of_week="mon-fri",
         hour=11,
         minute=0,
         timezone="Asia/Tokyo",

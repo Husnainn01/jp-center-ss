@@ -51,12 +51,16 @@ def upload_image(img_bytes: bytes, prefix: str, source_url: str) -> str | None:
         try:
             client = _get_client()
 
-            # Check if already exists
+            # Check if already exists — skip if file is already large (real image)
+            # but overwrite if existing file is small (placeholder)
             try:
-                client.head_object(Bucket=S3_BUCKET, Key=key)
-                return f"/s3/{key}"
+                head = client.head_object(Bucket=S3_BUCKET, Key=key)
+                existing_size = head.get("ContentLength", 0)
+                if existing_size >= 15000:
+                    return f"/s3/{key}"  # Already has a real image
+                # Existing file is small (placeholder) — overwrite with real image
             except ClientError:
-                pass
+                pass  # Doesn't exist yet — upload
 
             client.put_object(
                 Bucket=S3_BUCKET,
