@@ -206,11 +206,39 @@ async def backfill_iauc(page: Page, context: BrowserContext) -> dict:
 
 # ── NINJA Backfill ──────────────────────────────────────────────────────────
 
+async def _ninja_relogin(page: Page) -> bool:
+    """Re-login to NINJA on the same page. Returns True on success."""
+    from db import get_site_credentials
+    user_id, password = get_site_credentials("uss")
+    if not user_id or not password:
+        return False
+    try:
+        await page.goto("https://www.ninja-cartrade.jp/ninja/", wait_until="networkidle", timeout=60000)
+        await asyncio.sleep(2)
+        await page.fill("#loginId", user_id)
+        await page.fill("#password", password)
+        await page.evaluate("() => login()")
+        await asyncio.sleep(5)
+        await page.wait_for_load_state("networkidle", timeout=15000)
+        body = await page.inner_text("body")
+        if "different user" in body.lower():
+            await page.evaluate("""() => {
+                for (const a of document.querySelectorAll('a'))
+                    if (a.textContent.trim() === 'Login') { a.click(); return; }
+            }""")
+            await page.wait_for_load_state("networkidle", timeout=30000)
+            await asyncio.sleep(3)
+        return "searchcondition" in page.url
+    except:
+        return False
+
+
 async def backfill_ninja(page: Page, context: BrowserContext) -> dict:
     """Backfill missing exhibit sheets for NINJA/USS vehicles.
 
-    Opens detail pages via form submission to fetch exhibit sheet images.
-    item_id format: uss-{bidNo}-{times}
+    Uses iframe-based fetching (faster than new tabs) with re-login every fetch
+    since NINJA kills session after ~1 detail page request.
+    item_id format: uss-{bidNo}-{times} or uss-{bidNo}-{date}
     """
     missing = get_vehicles_missing_assets("uss")
     if not missing:
@@ -221,27 +249,42 @@ async def backfill_ninja(page: Page, context: BrowserContext) -> dict:
     images_missing = [v for v in missing if v["missing_image"]]
     print(f"[backfill] NINJA: {len(missing)} need backfill ({len(sheets_missing)} sheets, {len(images_missing)} images)")
 
-    # Focus on vehicles missing sheets (most common gap for NINJA)
     to_fix = sheets_missing[:MAX_BACKFILL_PER_RUN]
     if not to_fix:
         print("[backfill] NINJA: no sheet backfill needed")
         return {"attempted": 0, "fixed": 0}
 
-    # Make sure we're on a page with form1 (search results)
+    # Need form1 for sheet fetching — navigate to search results first
     has_form = await page.evaluate("() => !!document.getElementById('form1')")
     if not has_form:
-        print("[backfill] NINJA: no form1 on page, cannot backfill sheets")
-        return {"attempted": 0, "fixed": 0}
+        # Try to get to a search results page
+        has_fn = await page.evaluate("() => typeof seniToSearchcondition === 'function'")
+        if has_fn:
+            await page.evaluate("() => seniToSearchcondition()")
+            await asyncio.sleep(2)
+            # Select first maker and search to get form1
+            await page.evaluate("""() => {
+                const a = document.querySelector('a[onclick*="seniBrand"]');
+                if (a) a.click();
+            }""")
+            await asyncio.sleep(3)
+            await page.evaluate("() => typeof allSearch === 'function' && allSearch()")
+            await asyncio.sleep(5)
+        has_form = await page.evaluate("() => !!document.getElementById('form1')")
+        if not has_form:
+            print("[backfill] NINJA: cannot get to form1, skipping backfill")
+            return {"attempted": 0, "fixed": 0}
 
     fixed = 0
     errors = 0
+    fetched = 0
 
     for vehicle in to_fix:
-        if errors >= 5:
-            print("[backfill] NINJA: too many errors, stopping")
+        if errors >= 10:
+            print("[backfill] NINJA: too many consecutive errors, stopping")
             break
 
-        # Parse item_id: uss-{bidNo}-{times}
+        # Parse item_id: uss-{bidNo}-{times_or_date}
         parts = vehicle["item_id"].split("-", 2)
         if len(parts) < 3:
             continue
@@ -249,57 +292,92 @@ async def backfill_ninja(page: Page, context: BrowserContext) -> dict:
         times = parts[2]
 
         try:
-            # Submit form1 to open detail page in new tab
-            new_page_promise = context.wait_for_event("page", timeout=10000)
-            await page.evaluate("""(v) => {
-                document.getElementById('carKindType').value = '1';
-                document.getElementById('bidNo').value = v.bidNo;
-                document.getElementById('auctionCount').value = v.times;
-                document.getElementById('zaikoNo').value = '';
-                document.getElementById('action').value = 'init';
-                var form = document.getElementById('form1');
-                form.setAttribute('action', './cardetail.action');
-                form.setAttribute('target', '_blank');
-                form.submit();
+            # Use iframe to fetch detail page (faster, no new tab)
+            result = await page.evaluate("""(v) => {
+                return new Promise((resolve) => {
+                    let f = document.getElementById('_bf_frame');
+                    if (!f) {
+                        f = document.createElement('iframe');
+                        f.id = '_bf_frame'; f.name = '_bf_frame';
+                        f.style.cssText = 'position:absolute;left:-9999px;width:800px;height:600px';
+                        document.body.appendChild(f);
+                    }
+                    f.onload = function() {
+                        setTimeout(() => {
+                            try {
+                                const doc = f.contentDocument;
+                                const html = doc.documentElement.innerHTML;
+                                const loggedOut = doc.body.innerText.includes('logged out');
+                                let sheet = '';
+                                if (!loggedOut) {
+                                    doc.querySelectorAll('img').forEach(img => {
+                                        if (img.src.includes('get_ex_image')) sheet = img.src;
+                                    });
+                                    if (!sheet) {
+                                        const m = html.match(/action=get_ex_image&amp;FilePath=([^"&]*)/);
+                                        if (m) sheet = './cardetail.action?action=get_ex_image&FilePath=' + m[1];
+                                    }
+                                }
+                                resolve({ sheet, loggedOut });
+                            } catch(e) { resolve({ error: e.message, loggedOut: false, sheet: '' }); }
+                        }, 1500);
+                    };
+                    document.getElementById('carKindType').value = '1';
+                    document.getElementById('bidNo').value = v.bidNo;
+                    document.getElementById('auctionCount').value = v.times;
+                    document.getElementById('zaikoNo').value = '';
+                    document.getElementById('action').value = 'init';
+                    var form = document.getElementById('form1');
+                    form.setAttribute('action', './cardetail.action');
+                    form.setAttribute('target', '_bf_frame');
+                    form.submit();
+                    setTimeout(() => resolve({ error: 'timeout', loggedOut: false, sheet: '' }), 12000);
+                });
             }""", {"bidNo": bid_no, "times": times})
 
-            detail_page = await new_page_promise
-            await detail_page.wait_for_load_state("networkidle", timeout=10000)
-            await asyncio.sleep(0.5)
+            await page.evaluate("() => document.getElementById('form1')?.setAttribute('target', '')")
+            fetched += 1
 
-            # Extract exhibit sheet
-            sheet_url = await detail_page.evaluate("""() => {
-                for (const img of document.querySelectorAll('img')) {
-                    if (img.src && img.src.includes('get_ex_image')) return img.src;
-                }
-                return '';
-            }""")
+            if result.get('loggedOut'):
+                # Re-login and navigate back to search results
+                ok = await _ninja_relogin(page)
+                if not ok:
+                    print(f"[backfill] NINJA: re-login failed, stopping")
+                    break
+                # Navigate to search results to get form1 back
+                await page.evaluate("""() => {
+                    const a = document.querySelector('a[onclick*="seniBrand"]');
+                    if (a) a.click();
+                }""")
+                await asyncio.sleep(3)
+                await page.evaluate("() => typeof allSearch === 'function' && allSearch()")
+                await asyncio.sleep(5)
+                errors = 0  # Session death is expected, not an error
+                continue  # Retry this vehicle on next iteration... actually skip it
 
-            await detail_page.close()
-
-            if sheet_url:
-                uploaded = await _download_and_upload_bf(page, sheet_url, "ninja-images")
+            if result.get('sheet'):
+                uploaded = await _download_and_upload_bf(page, result['sheet'], "ninja-images")
                 if uploaded:
                     update_vehicle_assets(vehicle["item_id"], None, [], uploaded)
                     fixed += 1
                     errors = 0
+                    # Re-login proactively since session is likely about to die
+                    ok = await _ninja_relogin(page)
+                    if ok:
+                        # Get back to search results for form1
+                        await page.evaluate("""() => {
+                            const a = document.querySelector('a[onclick*="seniBrand"]');
+                            if (a) a.click();
+                        }""")
+                        await asyncio.sleep(3)
+                        await page.evaluate("() => typeof allSearch === 'function' && allSearch()")
+                        await asyncio.sleep(5)
             else:
                 errors = 0  # No sheet available, not an error
 
         except Exception as e:
             errors += 1
-            # Close any extra pages
-            for extra in context.pages[1:]:
-                try:
-                    await extra.close()
-                except:
-                    pass
+            print(f"[backfill] NINJA {bid_no}: error: {e}")
 
-    # Reset form target
-    try:
-        await page.evaluate("() => document.getElementById('form1')?.setAttribute('target', '')")
-    except:
-        pass
-
-    print(f"[backfill] NINJA: {fixed}/{len(to_fix)} sheets fixed")
+    print(f"[backfill] NINJA: {fixed}/{len(to_fix)} sheets fixed (fetched {fetched})")
     return {"attempted": len(to_fix), "fixed": fixed}

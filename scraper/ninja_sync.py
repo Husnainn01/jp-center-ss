@@ -56,20 +56,31 @@ async def run_ninja_sync(makers: list[str] | None = None):
                 log_sync(0, 0, 0, 0, int((time.time() - start) * 1000), error, source="ninja")
                 return
 
-            print("[ninja-sync] Scraping...")
+            # ── Phase 1: Get ALL vehicle data + photos (no detail pages) ──
+            print("[ninja-sync] Phase 1: Scraping all vehicle data...")
+            phase1_start = time.time()
             scraped_ids = await ninja_search_and_extract(context, makers=makers)
-
             total = len(scraped_ids)
+            phase1_time = time.time() - phase1_start
+            print(f"[ninja-sync] Phase 1 done: {total} vehicles in {phase1_time/60:.1f} min")
 
-            # Backfill missing images/sheets using the same session
-            print("[ninja-sync] Running image backfill...")
+            # Invalidate cache so customers see vehicles immediately
+            invalidate_cache()
+
+            # ── Phase 2: Backfill exhibit sheets (detail pages with re-login) ──
+            print("[ninja-sync] Phase 2: Backfilling exhibit sheets...")
+            phase2_start = time.time()
             try:
                 from backfill import backfill_ninja
                 page = context.pages[-1] if context.pages else await context.new_page()
                 bf_result = await backfill_ninja(page, context)
-                print(f"[ninja-sync] Backfill: {bf_result['fixed']}/{bf_result['attempted']} fixed")
+                phase2_time = time.time() - phase2_start
+                print(f"[ninja-sync] Phase 2 done: {bf_result['fixed']}/{bf_result['attempted']} sheets in {phase2_time/60:.1f} min")
             except Exception as be:
-                print(f"[ninja-sync] Backfill error (non-fatal): {be}")
+                print(f"[ninja-sync] Phase 2 error (non-fatal): {be}")
+
+            # Invalidate cache again after sheets are added
+            invalidate_cache()
 
             # Verify completeness
             try:
@@ -80,7 +91,6 @@ async def run_ninja_sync(makers: list[str] | None = None):
 
             duration_ms = int((time.time() - start) * 1000)
             log_sync(0, 0, 0, total, duration_ms, source="ninja")
-            invalidate_cache()
             print(f"[ninja-sync] Complete in {duration_ms/1000:.1f}s — {total} vehicles")
 
         except Exception as e:

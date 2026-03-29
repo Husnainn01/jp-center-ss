@@ -534,98 +534,24 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
         else:
             consecutive_all_existing = 0
 
-        # Fetch exhibit sheets via new-tab form submission + upload thumbnails
+        # Phase 1: Save vehicle data + thumbnails immediately (NO detail pages)
+        # Exhibit sheets are fetched separately by backfill to avoid session death
         if new_vehicles:
-            # Step 1: Get exhibit sheet URLs by submitting form1 to new tabs
-            sheet_urls = {}
-            sheet_errors = 0
-            for vehicle, _ in new_vehicles:
-                # Stop fetching sheets if main page is broken (5 consecutive failures = page likely dead)
-                if sheet_errors >= 5:
-                    print(f"  [ninja] {maker} p{page_num}: too many sheet errors, skipping remaining")
-                    break
-                rv_match = next((rv for rv in raw_vehicles if rv['bidNo'] == vehicle['lot_number']), None)
-                if not rv_match:
-                    continue
-                try:
-                    # Check form1 still exists on main page before submitting
-                    has_form = await page.evaluate("() => !!document.getElementById('form1')")
-                    if not has_form:
-                        print(f"  [ninja] {maker} p{page_num}: form1 lost, stopping sheet fetch")
-                        break
-
-                    new_page_promise = context.wait_for_event("page", timeout=10000)
-                    await page.evaluate("""(v) => {
-                        document.getElementById('carKindType').value = '1';
-                        document.getElementById('kaijoCode').value = v.site;
-                        document.getElementById('auctionCount').value = v.times;
-                        document.getElementById('bidNo').value = v.bidNo;
-                        document.getElementById('zaikoNo').value = '';
-                        document.getElementById('action').value = 'init';
-                        var form = document.getElementById('form1');
-                        form.setAttribute('action', './cardetail.action');
-                        form.setAttribute('target', '_blank');
-                        form.submit();
-                    }""", rv_match)
-                    detail_page = await new_page_promise
-                    await detail_page.wait_for_load_state("networkidle", timeout=10000)
-                    await asyncio.sleep(0.5)
-
-                    sheet_url = await detail_page.evaluate("""() => {
-                        for (const img of document.querySelectorAll('img')) {
-                            if (img.src && img.src.includes('get_ex_image')) return img.src;
-                        }
-                        return '';
-                    }""")
-                    if sheet_url:
-                        sheet_urls[vehicle['item_id']] = sheet_url
-                    await detail_page.close()
-                    sheet_errors = 0  # Reset on success
-                except Exception as e:
-                    sheet_errors += 1
-                    # Close any extra pages that may have opened
-                    for extra in context.pages[1:]:
-                        try:
-                            await extra.close()
-                        except:
-                            pass
-
-            # Reset form target
-            try:
-                await page.evaluate("() => document.getElementById('form1')?.setAttribute('target', '')")
-            except:
-                pass
-
-            if sheet_urls:
-                print(f"  [ninja] {maker} p{page_num}: found {len(sheet_urls)} exhibit sheets")
-
-            # Step 2: Upload thumbnails + exhibit sheets in parallel
+            # Upload thumbnails in parallel
             async def upload_one(url):
                 if not url:
                     return None
                 return await _download_and_upload(page, url, "ninja-images")
 
-            # Build upload tasks: thumbnail + sheet for each vehicle
-            upload_tasks = []
-            task_map = []  # track which task belongs to which vehicle
-            for i, (vehicle, img_url) in enumerate(new_vehicles):
-                upload_tasks.append(upload_one(img_url))
-                task_map.append(('thumb', i))
-                sheet_url = sheet_urls.get(vehicle['item_id'], '')
-                upload_tasks.append(upload_one(sheet_url))
-                task_map.append(('sheet', i))
-
+            upload_tasks = [upload_one(img_url) for _, img_url in new_vehicles]
             upload_results = await asyncio.gather(*upload_tasks, return_exceptions=True)
 
             vehicles_to_save = []
             for i, (vehicle, _) in enumerate(new_vehicles):
-                thumb_idx = i * 2
-                sheet_idx = i * 2 + 1
-                thumb = upload_results[thumb_idx] if not isinstance(upload_results[thumb_idx], Exception) else None
-                sheet = upload_results[sheet_idx] if not isinstance(upload_results[sheet_idx], Exception) else None
+                thumb = upload_results[i] if not isinstance(upload_results[i], Exception) else None
                 vehicle["images"] = [thumb] if thumb else []
                 vehicle["image_url"] = thumb
-                vehicle["exhibit_sheet"] = sheet
+                vehicle["exhibit_sheet"] = None  # Backfill fetches sheets later
                 vehicles_to_save.append(vehicle)
 
             if vehicles_to_save:
@@ -633,8 +559,7 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
                 all_ids.extend(v["item_id"] for v in vehicles_to_save)
                 existing_ids.update(v["item_id"] for v in vehicles_to_save)
                 img_total = sum(len(v.get("images", [])) for v in vehicles_to_save)
-                sheet_total = sum(1 for v in vehicles_to_save if v.get("exhibit_sheet"))
-                print(f"  [ninja] {maker} p{page_num}: {len(vehicles_to_save)} → DB (new:{result['new']}, imgs:{img_total}, sheets:{sheet_total})")
+                print(f"  [ninja] {maker} p{page_num}: {len(vehicles_to_save)} → DB (new:{result['new']}, imgs:{img_total})")
 
         # Next page
         has_next = await page.evaluate("""() => {
@@ -747,9 +672,11 @@ def _parse_list_row(rv: dict, maker: str) -> dict | None:
 
 
 PLACEHOLDER_PATTERNS = ["now_printing", "noimage", "no_image", "dummy", "blank", "placeholder"]
+MIN_REAL_IMAGE_SIZE = 15000  # 15KB — real car photos are 30KB+, placeholders under 15KB
 
 async def _download_and_upload(page: Page, url: str, prefix: str) -> str | None:
-    """Download image via authenticated browser and upload to R2. Retries once on failure. Skips placeholders."""
+    """Download image via authenticated browser and upload to R2. Retries once on failure.
+    Skips placeholders by URL pattern and by file size (<15KB)."""
     if any(p in url.lower() for p in PLACEHOLDER_PATTERNS):
         return None
     for attempt in range(2):
@@ -766,6 +693,8 @@ async def _download_and_upload(page: Page, url: str, prefix: str) -> str | None:
             if result and result.startswith("data:"):
                 b64 = result.split(",", 1)[1]
                 img_bytes = base64.b64decode(b64)
+                if len(img_bytes) < MIN_REAL_IMAGE_SIZE:
+                    return None  # Placeholder image (too small)
                 if len(img_bytes) > 500:
                     return upload_image(img_bytes, prefix, url)
             if attempt == 0:
