@@ -420,21 +420,45 @@ async def _paginate_results(page: Page, context: BrowserContext, maker: str, exi
     consecutive_all_existing = 0
 
     # Switch to 100 items per page for fewer page loads
-    await page.evaluate("""() => {
-        const links = document.querySelectorAll('a');
-        for (const a of links) {
-            if (a.textContent.trim() === '100' && a.getAttribute('onclick')
-                && a.getAttribute('onclick').includes('changeDisp')) {
-                a.click(); return true;
+    switched = await page.evaluate("""() => {
+        // Method 1: select#hyojiSu dropdown (newer NINJA pages)
+        const sel = document.getElementById('hyojiSu');
+        if (sel) {
+            sel.value = '100';
+            sel.dispatchEvent(new Event('change'));
+            return 'hyojiSu';
+        }
+        // Method 2: .selDisplayedItems dropdown (older pages)
+        const sel2 = document.querySelector('.selDisplayedItems');
+        if (sel2) {
+            sel2.value = '100';
+            sel2.dispatchEvent(new Event('change'));
+            return 'selDisplayedItems';
+        }
+        // Method 3: changeDisp link (legacy)
+        for (const a of document.querySelectorAll('a')) {
+            if (a.textContent.trim() === '100' && a.getAttribute('onclick')?.includes('changeDisp')) {
+                a.click();
+                return 'changeDisp';
             }
         }
-        return false;
+        return '';
     }""")
+    if switched:
+        print(f"  [ninja] {maker}: switched to 100/page via {switched}")
+    else:
+        print(f"  [ninja] {maker}: could not find page size selector, using default")
     try:
         await page.wait_for_load_state("networkidle", timeout=15000)
     except:
         pass
-    await asyncio.sleep(2)
+    await asyncio.sleep(3)
+    # Wait for results to reload with more items
+    for _ in range(10):
+        cnt = await page.evaluate("() => document.querySelectorAll('[onclick*=seniCarDetail]').length")
+        if cnt > 20:
+            break
+        await asyncio.sleep(1)
 
     while page_num < MAX_PAGES_PER_MAKER:
         # Check time and vehicle limits
